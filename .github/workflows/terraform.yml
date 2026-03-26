@@ -1,0 +1,46 @@
+name: Terraform
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "providers/**/terraform/**"
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.directory }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        directory:
+          - providers/aws/terraform
+          - providers/gcp/terraform
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@5c7944e73c4c2a096b17a9cb74d65b6c2bbafbde # v2.9.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+
+      - name: Terraform fmt
+        run: terraform fmt -check -diff
+        working-directory: ${{ matrix.directory }}
+
+      - name: Terraform init
+        run: terraform init -backend=false
+        working-directory: ${{ matrix.directory }}
+
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: ${{ matrix.directory }}
