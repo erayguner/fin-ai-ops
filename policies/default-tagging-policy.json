@@ -1,0 +1,14 @@
+{
+  "policy_id": "default-tagging-001",
+  "name": "Mandatory Resource Tagging",
+  "description": "All cloud resources must have team, cost-centre, environment, and owner tags for cost attribution and accountability. Untagged resources cannot be attributed to a cost centre and will trigger alerts.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre", "environment", "owner"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify"],
+  "enabled": true,
+  "created_at": "2026-03-26T00:00:00+00:00",
+  "updated_at": "2026-03-26T00:00:00+00:00"
+}

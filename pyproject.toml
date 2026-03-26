@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finops-automation-hub"
+version = "0.3.0"
+description = "FinOps Automation Hub — Native agent-powered cost governance for AWS and GCP"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+# GCP native agent stack (Google ADK + Cloud APIs)
+gcp = [
+    "google-adk>=1.0.0",
+    "google-cloud-logging>=3.10.0",
+    "google-cloud-billing-budgets>=1.14.0",
+    "google-cloud-bigquery>=3.20.0",
+    "google-cloud-resource-manager>=1.12.0",
+    "google-cloud-asset>=3.26.0",
+    "google-cloud-recommender>=2.16.0",
+]
+
+# AWS native agent stack (Bedrock + boto3)
+aws = [
+    "boto3>=1.35.0",
+]
+
+all-providers = [
+    "finops-automation-hub[aws,gcp]",
+]
+
+dev = [
+    "pytest>=8.3.0,<10",
+    "pytest-cov>=6.0.0,<8",
+    "ruff>=0.14.0,<1",
+    "mypy>=1.14.1,<2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-v --strict-markers --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["core", "providers", "agents", "mcp_server", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "S", "SIM", "RUF"]
+ignore = ["S101", "S310", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "ARG001"]

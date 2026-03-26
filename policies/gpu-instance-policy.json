@@ -1,0 +1,14 @@
+{
+  "policy_id": "gpu-instance-001",
+  "name": "GPU Instance Cost Governance",
+  "description": "GPU instances (AWS p3/p4/g4, GCP a2/g2) are high-cost resources that require mandatory justification and approval. All GPU instances must be tagged with a workload justification.",
+  "provider": null,
+  "resource_types": ["ec2:instance", "compute.instances"],
+  "max_monthly_cost_usd": 3000.0,
+  "require_tags": ["team", "cost-centre", "workload-justification", "owner"],
+  "require_approval_above_usd": 1000.0,
+  "auto_actions": ["notify", "require_approval", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-26T00:00:00+00:00",
+  "updated_at": "2026-03-26T00:00:00+00:00"
+}

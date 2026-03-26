@@ -1,0 +1,14 @@
+{
+  "policy_id": "high-cost-approval-001",
+  "name": "High-Cost Resource Approval Required",
+  "description": "Resources estimated to cost more than $2,000/month require explicit approval from the team lead. Resources above $5,000/month require Engineering Director approval.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": 5000.0,
+  "require_tags": ["team", "cost-centre"],
+  "require_approval_above_usd": 2000.0,
+  "auto_actions": ["notify", "require_approval"],
+  "enabled": true,
+  "created_at": "2026-03-26T00:00:00+00:00",
+  "updated_at": "2026-03-26T00:00:00+00:00"
+}
