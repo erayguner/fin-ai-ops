@@ -26,6 +26,9 @@ jobs:
 
       - name: Dependency review
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        # Advisory-only until Dependency Graph indexes the repository.
+        # Remove continue-on-error once the first merge to main is indexed.
+        continue-on-error: true
         with:
           fail-on-severity: high
           retry-on-snapshot-warnings: true
