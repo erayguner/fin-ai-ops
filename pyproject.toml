@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "FinOps Automation Hub — Native agent-powered cost governance for AWS and GCP"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
 dependencies = [
     "pydantic>=2.7,<3",
 ]
@@ -40,6 +40,9 @@ dev = [
     "ruff>=0.14.0,<1",
     "mypy>=1.14.1,<2",
 ]
+
+[tool.setuptools.packages.find]
+include = ["core*", "agents*", "providers*", "mcp_server*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
