@@ -39,7 +39,11 @@ dev = [
     "pytest-cov>=6.0.0,<8",
     "ruff>=0.14.0,<1",
     "mypy>=1.14.1,<2",
+    "pre-commit>=4.2.0,<5",
 ]
+
+[project.scripts]
+finops-hub = "core.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["core*", "agents*", "providers*", "mcp_server*"]
@@ -48,6 +52,9 @@ include = ["core*", "agents*", "providers*", "mcp_server*"]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-v --strict-markers --tb=short"
+markers = [
+    "integration: marks tests that require live cloud credentials (deselect with '-m \"not integration\"')",
+]
 
 [tool.mypy]
 python_version = "3.12"

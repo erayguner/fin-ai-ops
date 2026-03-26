@@ -1,0 +1,78 @@
+# FinOps Automation Hub — Configuration
+# Copy this file to hub_config.yaml and adjust values for your environment.
+# Environment variables (see .env.example) override these settings.
+
+# ── General ──
+hub:
+  version: "0.3.0"
+  audit_dir: audit_store
+  policy_dir: policies
+  event_store_backend: sqlite      # memory | sqlite
+  event_store_path: events.db
+
+# ── Cost Thresholds (USD/month) ──
+# Override per resource type. Three tiers: warning → critical → emergency.
+thresholds:
+  anomaly_multiplier: 2.0
+  min_datapoints: 3
+  defaults:
+    "ec2:instance":
+      warning: 500
+      critical: 2000
+      emergency: 5000
+    "rds:db":
+      warning: 800
+      critical: 3000
+      emergency: 8000
+    "compute.instances":
+      warning: 500
+      critical: 2000
+      emergency: 5000
+    "cloudsql.instances":
+      warning: 800
+      critical: 3000
+      emergency: 8000
+
+# ── Tagging Policy ──
+tags:
+  required:
+    - team
+    - cost-centre
+    - environment
+    - owner
+  case_sensitive: false
+
+# ── Escalation Timeframes ──
+escalation:
+  emergency: "1 hour"
+  critical: "24 hours"
+  warning: "7 days"
+  info: "next review cycle"
+
+# ── Notifications ──
+# Uncomment and configure the channels you need.
+notifications:
+  channels: []
+  # slack_webhook: "https://hooks.slack.com/services/T.../B.../..."
+  # pagerduty_routing_key: "your-routing-key"
+  # webhook_url: "https://your-endpoint.example.com/finops-alerts"
+
+# ── Monitoring ──
+monitoring:
+  poll_interval_seconds: 900    # 15 minutes
+
+# ── Pricing ──
+pricing:
+  default_region:
+    aws: eu-west-2
+    gcp: europe-west2
+  cache_ttl_hours: 24
+
+# ── Provider Configuration ──
+# aws:
+#   regions:
+#     - eu-west-2
+#     - us-east-1
+# gcp:
+#   projects:
+#     - my-project-id

@@ -7,3 +7,7 @@ Provides MCP tools for:
 - Audit trail querying and compliance export
 - Cost monitoring control (start, stop, status)
 """
+
+from .server import MCP_TOOLS, handle_tool_call, list_tools
+
+__all__ = ["MCP_TOOLS", "handle_tool_call", "list_tools"]

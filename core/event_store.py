@@ -354,11 +354,24 @@ class SQLiteEventStore(BaseEventStore):
             row[0]: {"count": row[1], "total_cost": round(row[2], 2)} for row in by_type_rows
         }
 
+        by_team: dict[str, float] = {}
+        try:
+            by_team_rows = conn.execute(
+                f"SELECT COALESCE(json_extract(tags, '$.team'), 'Untagged'),"  # noqa: S608  # nosec B608
+                f" SUM(estimated_monthly_cost_usd)"
+                f" FROM events {where}"
+                f" GROUP BY COALESCE(json_extract(tags, '$.team'), 'Untagged')",
+                params,
+            ).fetchall()
+            by_team = {row[0]: round(row[1], 2) for row in by_team_rows}
+        except Exception:
+            by_team = {}
+
         return {
             "total_events": total[0],
             "total_cost": round(total[1], 2),
             "by_resource_type": by_type,
-            "by_team": {},
+            "by_team": by_team,
         }
 
     @staticmethod

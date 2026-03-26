@@ -98,4 +98,4 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --cov=core --cov=agents --cov=mcp_server --cov-report=term-missing
+        run: pytest --cov=core --cov=agents --cov=mcp_server --cov-report=term-missing --cov-fail-under=70
