@@ -1,0 +1,34 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "python"]
+    groups:
+      dev-dependencies:
+        patterns: ["pytest*", "ruff", "mypy"]
+      google-cloud:
+        patterns: ["google-*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "github-actions"]
+
+  - package-ecosystem: "terraform"
+    directory: "/providers/aws/terraform"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "terraform"]
+
+  - package-ecosystem: "terraform"
+    directory: "/providers/gcp/terraform"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels: ["dependencies", "terraform"]

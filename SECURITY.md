@@ -51,7 +51,7 @@ If you discover a security vulnerability in this project, please report it respo
 
 1. **Do not** open a public GitHub issue for security vulnerabilities
 2. **Email**: Report to the repository maintainer via GitHub Security Advisories
-3. **GitHub**: Use the [Security Advisories](https://github.com/erayguner/iam-looker/security/advisories) feature to create a private report
+3. **GitHub**: Use the [Security Advisories](https://github.com/erayguner/fin-ai-ops/security/advisories) feature to create a private report
 4. **Include**: A clear description of the vulnerability, steps to reproduce, and potential impact
 
 We aim to acknowledge reports within 48 hours and provide a fix within 7 days for critical issues.

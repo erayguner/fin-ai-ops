@@ -30,7 +30,7 @@ from agents.reconciliation_agent import ReconciliationAgent
 from agents.report_agent import ReportAgent
 from core.audit import AuditLogger
 from core.config import HubConfig
-from core.event_store import InMemoryEventStore, SQLiteEventStore
+from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
 from core.models import (
     ActionStatus,
     CloudProvider,
@@ -39,6 +39,7 @@ from core.models import (
     Severity,
 )
 from core.notifications import (
+    BaseNotificationDispatcher,
     CompositeDispatcher,
     LogDispatcher,
     PagerDutyDispatcher,
@@ -91,13 +92,14 @@ pricing_service = LocalPricingService()
 
 # Event store — configurable backend
 _event_store_backend = hub_config.get_str("hub.event_store_backend", "memory")
+event_store: BaseEventStore
 if _event_store_backend == "sqlite":
     event_store = SQLiteEventStore(hub_config.get_str("hub.event_store_path", "events.db"))
 else:
     event_store = InMemoryEventStore()
 
 # Notification dispatchers — built from config
-_dispatchers = []
+_dispatchers: list[BaseNotificationDispatcher] = []
 _slack_url = hub_config.get_str("notifications.slack_webhook")
 if _slack_url:
     _dispatchers.append(SlackDispatcher(_slack_url))

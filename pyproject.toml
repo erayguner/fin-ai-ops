@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "FinOps Automation Hub — Native agent-powered cost governance for AWS and GCP"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "Apache-2.0"}
+license = {text = "MIT"}
 dependencies = [
     "pydantic>=2.7,<3",
 ]
@@ -45,6 +45,21 @@ dev = [
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-v --strict-markers --tb=short"
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "boto3.*",
+    "botocore.*",
+    "google.*",
+    "pydantic.*",
+    "yaml",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

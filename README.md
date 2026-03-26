@@ -1,5 +1,10 @@
 # FinOps Automation Hub
 
+[![CI](https://github.com/erayguner/fin-ai-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/erayguner/fin-ai-ops/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/erayguner/fin-ai-ops/actions/workflows/codeql.yml/badge.svg)](https://github.com/erayguner/fin-ai-ops/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+
 Autonomous cost governance for AWS and GCP using **provider-native agent frameworks** and **native MCP servers**. No API keys — all authentication is via IAM roles (AWS) and Workload Identity Federation (GCP).
 
 ## Architecture
@@ -289,3 +294,4 @@ Five MCP tools expose these capabilities: `finops_health_check`, `finops_reconci
 - **[Getting Started](docs/GETTING_STARTED.md)** — Zero-to-full deployment guide
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — Common issues and solutions
 - **[Security Policy](SECURITY.md)** — Security model and vulnerability reporting
+- **[Contributing](CONTRIBUTING.md)** — Development setup and PR guidelines
