@@ -31,7 +31,7 @@ def _bootstrap(config_path: str | None = None) -> dict[str, Any]:
     """Initialise core hub components and return them as a dict."""
     from core.audit import AuditLogger
     from core.config import HubConfig
-    from core.event_store import InMemoryEventStore, SQLiteEventStore
+    from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
     from core.logging_config import configure_logging
     from core.policies import PolicyEngine
     from core.thresholds import ThresholdEngine
@@ -43,6 +43,7 @@ def _bootstrap(config_path: str | None = None) -> dict[str, Any]:
     audit_dir = config.get_str("hub.audit_dir", "audit_store")
     audit_logger = AuditLogger(audit_dir)
 
+    event_store: BaseEventStore
     backend = config.get_str("hub.event_store_backend", "memory")
     if backend == "sqlite":
         event_store = SQLiteEventStore(config.get_str("hub.event_store_path", "events.db"))

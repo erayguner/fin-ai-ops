@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import TextIO
 
 __all__ = ["configure_logging"]
 
@@ -20,7 +21,7 @@ def configure_logging(
     level: int | str = logging.INFO,
     fmt: str = _DEFAULT_FORMAT,
     date_fmt: str = _DEFAULT_DATE_FORMAT,
-    stream: object = None,
+    stream: TextIO | None = None,
 ) -> None:
     """Configure logging for all hub modules.
 
@@ -30,7 +31,7 @@ def configure_logging(
         date_fmt: Date format for ``%(asctime)s``.
         stream: Output stream (defaults to ``sys.stderr``).
     """
-    handler = logging.StreamHandler(stream or sys.stderr)
+    handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
     handler.setFormatter(logging.Formatter(fmt, datefmt=date_fmt))
 
     root = logging.getLogger()
