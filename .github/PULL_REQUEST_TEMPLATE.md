@@ -10,6 +10,16 @@
 - [ ] Documentation
 - [ ] CI / infrastructure
 
+## Cost Impact
+
+<!-- If this PR changes policies, Terraform, or cloud resource definitions, complete this section -->
+
+- [ ] N/A — no cost-affecting changes
+- [ ] Policy validation passes (`python scripts/validate_policies.py`)
+- [ ] Terraform-policy drift check passes (`python scripts/drift_check.py`)
+- [ ] Estimated monthly cost impact: <!-- e.g. +$0, -$500/mo, new $2k/mo resource -->
+- [ ] Approval obtained for resources above policy thresholds
+
 ## Checklist
 
 - [ ] Tests pass (`pytest`)
@@ -19,3 +29,4 @@
 - [ ] New modules define `__all__` for explicit public API
 - [ ] External inputs validated via `core/validation.py` (if applicable)
 - [ ] Security checklist in [SECURITY.md](../SECURITY.md) reviewed (if touching public API)
+- [ ] Policy changes validated with `/finops:policy-check` (if touching `policies/`)
