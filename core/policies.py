@@ -211,7 +211,69 @@ class PolicyEngine:
                 f"manual approval (threshold: ${policy.require_approval_above_usd:,.2f})"
             )
 
+        if policy.blocked_regions and event.region in policy.blocked_regions:
+            violations.append(
+                f"Resource created in blocked region '{event.region}'"
+            )
+
+        if policy.preferred_regions and event.region not in policy.preferred_regions:
+            violations.append(
+                f"Resource created in non-preferred region '{event.region}'; "
+                f"preferred: {', '.join(policy.preferred_regions)}"
+            )
+
+        if (
+            policy.required_purchase_type
+            and event.purchase_type != policy.required_purchase_type
+        ):
+            violations.append(
+                f"Resource uses '{event.purchase_type}' purchase type, "
+                f"policy requires '{policy.required_purchase_type}'"
+            )
+
+        if policy.schedule:
+            schedule_violation = self._check_schedule_violation(event, policy)
+            if schedule_violation:
+                violations.append(schedule_violation)
+
         return violations
+
+    @staticmethod
+    def _check_schedule_violation(
+        event: ResourceCreationEvent, policy: CostPolicy
+    ) -> str | None:
+        """Check if a resource was created outside allowed schedule hours."""
+        active_hours = policy.schedule.get("active_hours", "")
+        if not active_hours or "-" not in active_hours:
+            return None
+
+        try:
+            start_str, end_str = active_hours.split("-", 1)
+            start_h, start_m = (int(x) for x in start_str.strip().split(":"))
+            end_h, end_m = (int(x) for x in end_str.strip().split(":"))
+        except (ValueError, IndexError):
+            return None
+
+        event_hour = event.timestamp.hour
+        event_minute = event.timestamp.minute
+        event_time = event_hour * 60 + event_minute
+        start_time = start_h * 60 + start_m
+        end_time = end_h * 60 + end_m
+
+        outside_hours = (
+            event_time < start_time or event_time >= end_time
+            if start_time < end_time
+            else event_time < start_time and event_time >= end_time
+        )
+
+        if outside_hours:
+            active_days = policy.schedule.get("active_days", "")
+            return (
+                f"Resource created outside active hours ({active_hours}"
+                f"{', ' + active_days if active_days else ''})"
+            )
+
+        return None
 
     def _persist_policy(self, policy: CostPolicy) -> None:
         policy_file = self._policy_dir / f"{policy.policy_id}.json"

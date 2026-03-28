@@ -72,6 +72,10 @@ class ResourceCreationEvent(BaseModel):
     creator_identity: str = Field(description="IAM principal who created the resource")
     creator_email: str = ""
     estimated_monthly_cost_usd: float = 0.0
+    purchase_type: str = Field(
+        default="on-demand",
+        description="Purchase type: on-demand, spot, preemptible, reserved",
+    )
     tags: dict[str, str] = Field(default_factory=dict)
     raw_event: dict[str, Any] = Field(default_factory=dict)
 
@@ -162,11 +166,53 @@ class CostPolicy(BaseModel):
     )
     auto_actions: list[str] = Field(
         default_factory=list,
-        description="Actions to take automatically (e.g. notify, tag, restrict)",
+        description="Actions to take automatically (e.g. notify, tag, restrict, auto_stop)",
     )
     enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    # --- Extended policy fields (2026 FinOps best practices) ---
+    blocked_regions: list[str] = Field(
+        default_factory=list,
+        description="Regions where resource creation is forbidden (e.g. high-carbon regions)",
+    )
+    preferred_regions: list[str] = Field(
+        default_factory=list,
+        description="Preferred regions for sustainability or cost; violations are warnings",
+    )
+    required_purchase_type: str | None = Field(
+        default=None,
+        description="Required purchase type for matching resources: spot, preemptible, reserved",
+    )
+    schedule: dict[str, str] = Field(
+        default_factory=dict,
+        description="Time-based schedule e.g. {'active_hours': '07:00-19:00', 'active_days': 'mon-fri'}",
+    )
+    min_commitment_coverage_pct: float | None = Field(
+        default=None,
+        description="Minimum RI/Savings Plan coverage percentage (evaluated at account level)",
+    )
+    acknowledgement_sla_hours: int | None = Field(
+        default=None,
+        description="Max hours to acknowledge a cost alert before auto-escalation",
+    )
+    resolution_sla_hours: int | None = Field(
+        default=None,
+        description="Max hours to resolve a cost alert before auto-escalation",
+    )
+    max_account_monthly_budget_usd: float | None = Field(
+        default=None,
+        description="Hard budget ceiling per AWS account or GCP project",
+    )
+    unit_cost_metric: str | None = Field(
+        default=None,
+        description="Metric name for unit economics tracking (e.g. cost-per-request)",
+    )
+    unit_cost_threshold_usd: float | None = Field(
+        default=None,
+        description="Maximum acceptable cost per unit for unit economics policies",
+    )
 
 
 class AuditEntry(BaseModel):

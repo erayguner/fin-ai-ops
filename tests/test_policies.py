@@ -1,6 +1,7 @@
 """Tests for the policy engine."""
 
 import tempfile
+from datetime import UTC
 
 from core.audit import AuditLogger
 from core.models import CloudProvider, CostPolicy, ResourceCreationEvent
@@ -127,3 +128,168 @@ class TestPolicyEngine:
             count = engine2.load_policies()
             assert count == 1
             assert engine2.get_policies()[0].name == "Persistent Policy"
+
+    def test_blocked_region_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                blocked_regions=["us-east-1", "ap-southeast-1"],
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(region="us-east-1")
+            results = engine.evaluate_event(event)
+            assert len(results) == 1
+            _, violations = results[0]
+            assert any("blocked region" in v for v in violations)
+
+    def test_blocked_region_no_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                blocked_regions=["us-east-1"],
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(region="eu-west-2")
+            results = engine.evaluate_event(event)
+            assert len(results) == 0
+
+    def test_preferred_region_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                preferred_regions=["eu-north-1", "eu-west-1"],
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(region="us-east-1")
+            results = engine.evaluate_event(event)
+            assert len(results) == 1
+            _, violations = results[0]
+            assert any("non-preferred region" in v for v in violations)
+
+    def test_preferred_region_no_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                preferred_regions=["eu-west-2", "eu-north-1"],
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(region="eu-west-2")
+            results = engine.evaluate_event(event)
+            assert len(results) == 0
+
+    def test_required_purchase_type_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                required_purchase_type="spot",
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(purchase_type="on-demand")
+            results = engine.evaluate_event(event)
+            assert len(results) == 1
+            _, violations = results[0]
+            assert any("purchase type" in v for v in violations)
+
+    def test_required_purchase_type_no_violation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                required_purchase_type="spot",
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            event = _make_event(purchase_type="spot")
+            results = engine.evaluate_event(event)
+            assert len(results) == 0
+
+    def test_schedule_violation_outside_hours(self):
+        from datetime import datetime as dt
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                schedule={"active_hours": "07:00-19:00", "active_days": "mon-fri"},
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            # Create event at 22:00 UTC (outside 07:00-19:00)
+            event = _make_event(
+                timestamp=dt(2026, 3, 28, 22, 0, tzinfo=UTC),
+            )
+            results = engine.evaluate_event(event)
+            assert len(results) == 1
+            _, violations = results[0]
+            assert any("outside active hours" in v for v in violations)
+
+    def test_schedule_no_violation_within_hours(self):
+        from datetime import datetime as dt
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine = self._create_engine(tmpdir)
+            policy = _make_policy(
+                schedule={"active_hours": "07:00-19:00", "active_days": "mon-fri"},
+                require_tags=[],
+                max_monthly_cost_usd=None,
+            )
+            engine.create_policy(policy)
+
+            # Create event at 12:00 UTC (within 07:00-19:00)
+            event = _make_event(
+                timestamp=dt(2026, 3, 28, 12, 0, tzinfo=UTC),
+            )
+            results = engine.evaluate_event(event)
+            assert len(results) == 0
+
+    def test_load_extended_policy_fields(self):
+        """Verify that policies with new fields can be persisted and reloaded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audit = AuditLogger(f"{tmpdir}/audit")
+            engine1 = PolicyEngine(f"{tmpdir}/policies", audit)
+            policy = _make_policy(
+                name="Extended Policy",
+                blocked_regions=["us-east-1"],
+                preferred_regions=["eu-north-1"],
+                required_purchase_type="spot",
+                schedule={"active_hours": "07:00-19:00"},
+                min_commitment_coverage_pct=70.0,
+                acknowledgement_sla_hours=4,
+                resolution_sla_hours=48,
+                max_account_monthly_budget_usd=25000.0,
+                unit_cost_metric="cost-per-request",
+                unit_cost_threshold_usd=0.005,
+            )
+            engine1.create_policy(policy)
+
+            engine2 = PolicyEngine(f"{tmpdir}/policies", audit)
+            count = engine2.load_policies()
+            assert count == 1
+            loaded = engine2.get_policies()[0]
+            assert loaded.blocked_regions == ["us-east-1"]
+            assert loaded.preferred_regions == ["eu-north-1"]
+            assert loaded.required_purchase_type == "spot"
+            assert loaded.schedule == {"active_hours": "07:00-19:00"}
+            assert loaded.min_commitment_coverage_pct == 70.0
+            assert loaded.acknowledgement_sla_hours == 4
+            assert loaded.resolution_sla_hours == 48
+            assert loaded.max_account_monthly_budget_usd == 25000.0
+            assert loaded.unit_cost_metric == "cost-per-request"
+            assert loaded.unit_cost_threshold_usd == 0.005
