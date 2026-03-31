@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Repository health check script.
+
 Runs all self-maintenance checks: policies, tests, dependencies, staleness.
 Used by CI and the /health-check command.
 
@@ -41,7 +42,7 @@ def check_policies(root: Path) -> tuple[str, str]:
 
 
 def check_tests(root: Path) -> tuple[str, str]:
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--tb=line"],
         capture_output=True,
         text=True,
