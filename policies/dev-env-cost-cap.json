@@ -1,0 +1,14 @@
+{
+  "policy_id": "dev-env-cost-cap-001",
+  "name": "Development Environment Cost Cap",
+  "description": "Non-production environments (dev/staging) must not exceed $500/month per resource. Prevents dev sprawl from becoming a silent cost center. Requires auto-shutdown-schedule tag to enforce off-hours shutdown.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": 500.0,
+  "require_tags": ["environment", "team", "cost-centre", "auto-shutdown-schedule"],
+  "require_approval_above_usd": 250.0,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

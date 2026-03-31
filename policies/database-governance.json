@@ -1,0 +1,22 @@
+{
+  "policy_id": "database-governance-001",
+  "name": "Managed Database Cost Governance",
+  "description": "RDS, Cloud SQL, Aurora, and similar managed databases require backup-schedule and scaling-policy tags. Multi-AZ and HA deployments above $3,000/month need explicit approval. Databases are typically the second largest cloud cost category.",
+  "provider": null,
+  "resource_types": [
+    "rds:db",
+    "rds:cluster",
+    "sqladmin.instances",
+    "dynamodb:table",
+    "spanner.instances",
+    "elasticache:cluster",
+    "memorystore.instances"
+  ],
+  "max_monthly_cost_usd": 5000.0,
+  "require_tags": ["team", "cost-centre", "backup-schedule", "scaling-policy", "owner"],
+  "require_approval_above_usd": 3000.0,
+  "auto_actions": ["notify", "require_approval"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

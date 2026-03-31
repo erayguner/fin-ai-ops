@@ -1,0 +1,15 @@
+{
+  "policy_id": "account-budget-001",
+  "name": "Multi-Account Monthly Budget Guardrail",
+  "description": "Hard budget ceiling of $25,000/month per AWS account or GCP project. Resources that would push monthly spend over the ceiling are flagged for immediate review. Integrates with AWS Budgets and GCP Budget APIs for enforcement.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "require_approval", "auto_escalate"],
+  "enabled": true,
+  "max_account_monthly_budget_usd": 25000.0,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

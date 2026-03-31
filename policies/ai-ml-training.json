@@ -1,0 +1,20 @@
+{
+  "policy_id": "ai-ml-training-001",
+  "name": "AI/ML Training Job Budget Control",
+  "description": "SageMaker, Vertex AI training jobs, and Bedrock fine-tuning are capped at $5,000/month. Requires experiment-id and model-name tags for cost attribution to specific ML experiments. Approval required above $2,000/month.",
+  "provider": null,
+  "resource_types": [
+    "sagemaker:training-job",
+    "sagemaker:endpoint",
+    "aiplatform.trainingPipelines",
+    "aiplatform.endpoints",
+    "bedrock:model-customization-job"
+  ],
+  "max_monthly_cost_usd": 5000.0,
+  "require_tags": ["team", "cost-centre", "experiment-id", "model-name", "owner"],
+  "require_approval_above_usd": 2000.0,
+  "auto_actions": ["notify", "require_approval", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

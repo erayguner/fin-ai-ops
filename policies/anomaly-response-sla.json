@@ -1,0 +1,16 @@
+{
+  "policy_id": "anomaly-sla-001",
+  "name": "Anomaly Response SLA Policy",
+  "description": "Cost anomalies must be acknowledged within 4 hours and resolved within 48 hours. Unacknowledged anomalies auto-escalate to engineering director. Aligns with FinOps Foundation 2026 real-time response maturity model.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "auto_escalate"],
+  "enabled": true,
+  "acknowledgement_sla_hours": 4,
+  "resolution_sla_hours": 48,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

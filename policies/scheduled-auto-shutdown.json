@@ -1,0 +1,25 @@
+{
+  "policy_id": "auto-shutdown-001",
+  "name": "Scheduled Auto-Shutdown for Non-Production",
+  "description": "Dev and staging resources must be shut down outside business hours (19:00-07:00 UTC, weekdays only). FinOps Foundation 2026 estimates 30-40% savings from scheduled shutdowns. Resources created outside active hours trigger an immediate flag.",
+  "provider": null,
+  "resource_types": [
+    "ec2:instance",
+    "compute.instances",
+    "rds:db",
+    "sqladmin.instances",
+    "eks:nodegroup",
+    "container.nodePools"
+  ],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["environment", "team", "cost-centre", "auto-shutdown-schedule"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "auto_stop", "flag_for_review"],
+  "enabled": true,
+  "schedule": {
+    "active_hours": "07:00-19:00",
+    "active_days": "mon-fri"
+  },
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

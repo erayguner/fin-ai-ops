@@ -1,0 +1,19 @@
+{
+  "policy_id": "k8s-nodepool-001",
+  "name": "Kubernetes Node Pool Cost Governance",
+  "description": "EKS/GKE node pools are the primary hidden cost driver in containerised workloads. Requires workload-type tag to distinguish batch vs serving, and scaling-max-nodes to cap autoscaler runaway. Approval required above $4,000/month.",
+  "provider": null,
+  "resource_types": [
+    "eks:nodegroup",
+    "eks:cluster",
+    "container.nodePools",
+    "container.clusters"
+  ],
+  "max_monthly_cost_usd": 8000.0,
+  "require_tags": ["team", "cost-centre", "workload-type", "scaling-max-nodes"],
+  "require_approval_above_usd": 4000.0,
+  "auto_actions": ["notify", "require_approval", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

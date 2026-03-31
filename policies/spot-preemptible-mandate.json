@@ -1,0 +1,22 @@
+{
+  "policy_id": "spot-mandate-001",
+  "name": "Spot/Preemptible Instance Mandate for Batch Workloads",
+  "description": "Batch processing, CI/CD, data pipelines, and ML training workloads must use spot or preemptible instances. On-demand for these workload types costs 60-80% more. Requires workload-justification tag if on-demand is used.",
+  "provider": null,
+  "resource_types": [
+    "ec2:instance",
+    "compute.instances",
+    "batch:job",
+    "dataflow.jobs",
+    "sagemaker:training-job",
+    "aiplatform.trainingPipelines"
+  ],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre", "workload-type"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "required_purchase_type": "spot",
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

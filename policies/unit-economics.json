@@ -1,0 +1,23 @@
+{
+  "policy_id": "unit-economics-001",
+  "name": "Unit Economics Cost Tracking",
+  "description": "Tracks cost-per-transaction for API and data processing workloads. Alerts when unit cost exceeds $0.005/request. Requires integration with CloudWatch or Cloud Monitoring for metric ingestion. Enables executive-level cost visibility.",
+  "provider": null,
+  "resource_types": [
+    "lambda:function",
+    "cloudfunctions.functions",
+    "apigateway:restapi",
+    "apigateway.apis",
+    "ecs:service",
+    "run.services"
+  ],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre", "service-name"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "unit_cost_metric": "cost-per-request",
+  "unit_cost_threshold_usd": 0.005,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

@@ -1,0 +1,20 @@
+{
+  "policy_id": "data-transfer-001",
+  "name": "Cross-Region Data Transfer Cost Governance",
+  "description": "Cross-region and internet-bound data transfer costs are often invisible until the bill arrives. NAT gateways, VPC endpoints, and interconnects above $500/month require review. Requires data-classification tag for compliance tracking.",
+  "provider": null,
+  "resource_types": [
+    "ec2:nat-gateway",
+    "ec2:vpc-endpoint",
+    "compute.interconnects",
+    "compute.routers",
+    "cloudfront:distribution"
+  ],
+  "max_monthly_cost_usd": 1000.0,
+  "require_tags": ["team", "cost-centre", "data-classification"],
+  "require_approval_above_usd": 500.0,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

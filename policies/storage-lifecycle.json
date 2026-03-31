@@ -1,0 +1,21 @@
+{
+  "policy_id": "storage-lifecycle-001",
+  "name": "Storage Lifecycle Enforcement",
+  "description": "All storage resources must declare retention-policy and data-classification tags. Prevents unbounded storage growth — the FinOps Foundation estimates 20-30% of storage spend is on data that should have been tiered or deleted.",
+  "provider": null,
+  "resource_types": [
+    "s3:bucket",
+    "storage.buckets",
+    "ec2:volume",
+    "compute.disks",
+    "efs:file-system",
+    "filestore.instances"
+  ],
+  "max_monthly_cost_usd": 2000.0,
+  "require_tags": ["team", "cost-centre", "retention-policy", "data-classification"],
+  "require_approval_above_usd": 1000.0,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}

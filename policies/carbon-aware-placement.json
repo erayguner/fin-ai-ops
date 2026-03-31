@@ -1,0 +1,25 @@
+{
+  "policy_id": "carbon-aware-001",
+  "name": "Carbon-Aware Region Placement",
+  "description": "GreenOps policy aligned with FinOps Foundation 2026 sustainability pillar. Blocks resource creation in high-carbon regions and prefers low-carbon alternatives. AWS regions with renewable energy commitments and GCP low-carbon regions are preferred.",
+  "provider": null,
+  "resource_types": [],
+  "max_monthly_cost_usd": null,
+  "require_tags": ["team", "cost-centre"],
+  "require_approval_above_usd": null,
+  "auto_actions": ["notify", "flag_for_review"],
+  "enabled": true,
+  "preferred_regions": [
+    "eu-north-1",
+    "eu-west-1",
+    "ca-central-1",
+    "us-west-2",
+    "europe-north1",
+    "europe-west1",
+    "northamerica-northeast1",
+    "us-central1"
+  ],
+  "blocked_regions": [],
+  "created_at": "2026-03-28T00:00:00+00:00",
+  "updated_at": "2026-03-28T00:00:00+00:00"
+}
