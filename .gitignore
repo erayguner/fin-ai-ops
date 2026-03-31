@@ -7,6 +7,11 @@ dist/
 build/
 .eggs/
 
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
 # Virtual environments
 .venv/
 venv/
