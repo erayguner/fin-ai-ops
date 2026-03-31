@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Repository health check script.
-
 Runs all self-maintenance checks: policies, tests, dependencies, staleness.
 Used by CI and the /health-check command.
 
