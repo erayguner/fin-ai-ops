@@ -45,7 +45,7 @@ class GCPEventListener(BaseCloudProvider):
 
     def __init__(self) -> None:
         self._cost_analyzer = GCPCostAnalyzer()
-        self._logging_client = None
+        self._logging_client: Any = None
 
     @property
     def provider_name(self) -> CloudProvider:

@@ -87,7 +87,9 @@ class TestReportGeneration:
         now = datetime.now(UTC)
         events = [
             _make_event(resource_id="r1", cost=100.0, ts=now - timedelta(hours=1)),
-            _make_event(resource_id="r2", cost=200.0, resource_type="rds:db", ts=now - timedelta(hours=2)),
+            _make_event(
+                resource_id="r2", cost=200.0, resource_type="rds:db", ts=now - timedelta(hours=2)
+            ),
         ]
         report = agent.generate_report(
             events=events,
@@ -173,7 +175,9 @@ class TestReportRecommendations:
             period_start=now - timedelta(days=1),
             period_end=now,
         )
-        assert any("critical" in r.lower() or "unresolved" in r.lower() for r in report.recommendations)
+        assert any(
+            "critical" in r.lower() or "unresolved" in r.lower() for r in report.recommendations
+        )
 
     def test_high_cost_recommendation(self):
         agent = ReportAgent(audit_logger=AuditLogger(tempfile.mkdtemp()))
@@ -185,7 +189,9 @@ class TestReportRecommendations:
             period_start=now - timedelta(days=1),
             period_end=now,
         )
-        assert any("reserved" in r.lower() or "committed" in r.lower() for r in report.recommendations)
+        assert any(
+            "reserved" in r.lower() or "committed" in r.lower() for r in report.recommendations
+        )
 
 
 class TestAccountabilitySummary:

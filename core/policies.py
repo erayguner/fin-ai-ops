@@ -212,9 +212,7 @@ class PolicyEngine:
             )
 
         if policy.blocked_regions and event.region in policy.blocked_regions:
-            violations.append(
-                f"Resource created in blocked region '{event.region}'"
-            )
+            violations.append(f"Resource created in blocked region '{event.region}'")
 
         if policy.preferred_regions and event.region not in policy.preferred_regions:
             violations.append(
@@ -222,10 +220,7 @@ class PolicyEngine:
                 f"preferred: {', '.join(policy.preferred_regions)}"
             )
 
-        if (
-            policy.required_purchase_type
-            and event.purchase_type != policy.required_purchase_type
-        ):
+        if policy.required_purchase_type and event.purchase_type != policy.required_purchase_type:
             violations.append(
                 f"Resource uses '{event.purchase_type}' purchase type, "
                 f"policy requires '{policy.required_purchase_type}'"
@@ -239,9 +234,7 @@ class PolicyEngine:
         return violations
 
     @staticmethod
-    def _check_schedule_violation(
-        event: ResourceCreationEvent, policy: CostPolicy
-    ) -> str | None:
+    def _check_schedule_violation(event: ResourceCreationEvent, policy: CostPolicy) -> str | None:
         """Check if a resource was created outside allowed schedule hours."""
         active_hours = policy.schedule.get("active_hours", "")
         if not active_hours or "-" not in active_hours:

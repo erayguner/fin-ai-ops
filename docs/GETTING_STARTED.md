@@ -53,8 +53,8 @@ This guide takes you from zero to a fully operational FinOps Automation Hub. It 
 
 ```bash
 # Clone the repository
-git clone https://github.com/erayguner/iam-looker.git
-cd iam-looker/finops-automation-hub
+git clone https://github.com/erayguner/fin-ai-ops.git
+cd fin-ai-ops
 
 # Create a virtual environment
 python -m venv .venv
@@ -223,7 +223,7 @@ The pre-flight script validates:
 - KMS key accessibility (AWS)
 - API enablement (GCP)
 - MCP server tool availability
-- Test suite passes (367 tests)
+- Test suite passes (442 tests)
 
 Fix any failures before proceeding. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues.
 

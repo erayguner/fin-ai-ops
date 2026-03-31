@@ -16,8 +16,7 @@ class TestConfigureLogging:
         configure_logging(stream=stream)
         root = logging.getLogger()
         assert any(
-            isinstance(h, logging.StreamHandler) and h.stream is stream
-            for h in root.handlers
+            isinstance(h, logging.StreamHandler) and h.stream is stream for h in root.handlers
         )
 
     def test_quietens_noisy_loggers(self):

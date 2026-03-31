@@ -29,7 +29,9 @@ class TestGCPEventListenerInit:
 
     def test_estimate_monthly_cost_delegates(self):
         listener = GCPEventListener()
-        cost = listener.estimate_monthly_cost("compute.instances", {"machine_type": "n2-standard-2"})
+        cost = listener.estimate_monthly_cost(
+            "compute.instances", {"machine_type": "n2-standard-2"}
+        )
         assert isinstance(cost, float)
         assert cost >= 0
 
@@ -54,9 +56,7 @@ class TestGCPCreatorIdentity:
     def test_extracts_principal_email(self):
         listener = GCPEventListener()
         event_data = {
-            "protoPayload": {
-                "authenticationInfo": {"principalEmail": "alice@example.com"}
-            }
+            "protoPayload": {"authenticationInfo": {"principalEmail": "alice@example.com"}}
         }
         principal, email = listener.get_creator_identity(event_data)
         assert principal == "alice@example.com"
@@ -89,9 +89,7 @@ class TestGCPExtractResourceConfig:
         listener = GCPEventListener()
         raw = {
             "protoPayload": {
-                "request": {
-                    "machineType": "zones/us-central1-a/machineTypes/n2-standard-4"
-                }
+                "request": {"machineType": "zones/us-central1-a/machineTypes/n2-standard-4"}
             }
         }
         config = listener._extract_resource_config(raw, "compute.instances")
@@ -231,9 +229,7 @@ class TestAWSCreatorIdentity:
         event_data = {
             "userIdentity": {
                 "principalId": "AROAEXAMPLE:session",
-                "sessionContext": {
-                    "sessionIssuer": {"userName": "role-name"}
-                },
+                "sessionContext": {"sessionIssuer": {"userName": "role-name"}},
             }
         }
         principal, email = listener.get_creator_identity(event_data)

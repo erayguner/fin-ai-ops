@@ -116,7 +116,7 @@ def detect_costly_resources(
         creator, cost, and recommended actions.
     """
     try:
-        from google.cloud import asset_v1
+        from google.cloud import asset_v1  # type: ignore[attr-defined]
 
         client = asset_v1.AssetServiceClient()  # Uses ADC/WIF
         request = asset_v1.ListAssetsRequest(
@@ -185,7 +185,7 @@ def check_label_compliance(
         required_labels = ["team", "cost-centre", "environment", "owner"]
 
     try:
-        from google.cloud import asset_v1
+        from google.cloud import asset_v1  # type: ignore[attr-defined]
 
         client = asset_v1.AssetServiceClient()
         request = asset_v1.ListAssetsRequest(
@@ -248,7 +248,7 @@ def get_budget_status(
         dict with budgets, spend vs limit, and any threshold breaches.
     """
     try:
-        from google.cloud import billing_budgets_v1
+        from google.cloud import billing_budgets_v1  # type: ignore[attr-defined]
 
         billing_budgets_v1.BudgetServiceClient()  # Verify credentials/import
         # List budgets for the billing account associated with the project
@@ -281,7 +281,7 @@ def recommend_cost_optimisations(
         dict with categorised recommendations and estimated savings.
     """
     try:
-        from google.cloud import recommender_v1
+        from google.cloud import recommender_v1  # type: ignore[attr-defined]
 
         client = recommender_v1.RecommenderClient()
 

@@ -581,4 +581,4 @@ The SQLite backend keeps data on disk and uses SQL queries, significantly reduci
 1. Run `python scripts/preflight_check.py --all` to diagnose common issues
 2. Check the audit trail for error entries: `finops_query_audit --action *.error`
 3. Review CloudTrail (AWS) or Cloud Audit Logs (GCP) for permission issues
-4. File an issue at [github.com/erayguner/iam-looker/issues](https://github.com/erayguner/iam-looker/issues)
+4. File an issue at [github.com/erayguner/fin-ai-ops/issues](https://github.com/erayguner/fin-ai-ops/issues)
