@@ -1,0 +1,47 @@
+{
+  "policy_id": "tagging-gcp-ai-ml-2026",
+  "name": "GCP AI/ML Workload Labelling Policy",
+  "description": "Stricter labelling for GCP Vertex AI, Discovery Engine, and Gemini-powered agent workloads. Enforces model-family, workload-class, and lifecycle phase labels needed for per-model chargeback and responsible-AI governance.",
+  "provider": "gcp",
+  "resource_types": [
+    "aiplatform.endpoints",
+    "aiplatform.models",
+    "aiplatform.pipelines",
+    "aiplatform.training-jobs",
+    "aiplatform.feature-stores",
+    "aiplatform.notebooks",
+    "aiplatform.vector-indexes",
+    "aiplatform.agents",
+    "aiplatform.gemini-tuning-jobs",
+    "discoveryengine.datastores",
+    "discoveryengine.engines"
+  ],
+  "required_tags": [
+    "team",
+    "cost_centre",
+    "environment",
+    "owner",
+    "application",
+    "managed_by",
+    "data_classification",
+    "model_family",
+    "workload_class",
+    "ai_workload_phase"
+  ],
+  "recommended_tags": [
+    "model_version",
+    "training_run_id",
+    "responsible_ai_review"
+  ],
+  "tag_value_patterns": {
+    "cost_centre": "cc-[0-9]{4}",
+    "environment": "prod|staging|dev|sandbox|shared",
+    "data_classification": "public|internal|confidential|restricted",
+    "workload_class": "training|fine-tuning|inference|evaluation|rag",
+    "ai_workload_phase": "research|pilot|production|deprecated"
+  },
+  "severity_when_missing": "critical",
+  "enabled": true,
+  "created_at": "2026-04-16T00:00:00+00:00",
+  "updated_at": "2026-04-16T00:00:00+00:00"
+}
