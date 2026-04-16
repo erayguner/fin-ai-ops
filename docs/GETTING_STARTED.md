@@ -223,7 +223,7 @@ The pre-flight script validates:
 - KMS key accessibility (AWS)
 - API enablement (GCP)
 - MCP server tool availability
-- Test suite passes (522 tests)
+- Test suite passes (539 tests)
 
 Fix any failures before proceeding. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues.
 

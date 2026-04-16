@@ -542,7 +542,7 @@ The `CompositeDispatcher` sends to all configured channels. One channel failing 
 
 ### Tests are slow
 
-**Fix**: The 522-test suite should complete in around 10-12 seconds. If significantly slower:
+**Fix**: The 539-test suite should complete in around 10-12 seconds. If significantly slower:
 - Ensure no cloud API calls are being made (tests should work offline)
 - Clear `__pycache__`: `find . -name '__pycache__' -exec rm -rf {} +`
 - Run with `-x` to stop on first failure: `pytest -x`
