@@ -24,8 +24,12 @@ ruff format --check .
 # Type check
 mypy core providers agents mcp_server
 
-# Tests (367 tests, < 1 second)
+# Tests (522 tests, ~11s)
 pytest
+
+# Terraform validation
+cd providers/aws/terraform && terraform init -backend=false && terraform validate
+cd providers/gcp/terraform && terraform init -backend=false && terraform validate
 ```
 
 ## Pull Request Process
