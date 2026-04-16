@@ -33,6 +33,51 @@ output "bedrock_agent_arn" {
   value       = aws_bedrockagent_agent.finops.agent_arn
 }
 
+output "bedrock_agent_alias_arn" {
+  description = "Production alias ARN — invoke this from applications (blue/green promotion target)."
+  value       = aws_bedrockagent_agent_alias.prod.agent_alias_arn
+}
+
+output "bedrock_agent_alias_id" {
+  description = "Production alias ID for InvokeAgent calls."
+  value       = aws_bedrockagent_agent_alias.prod.agent_alias_id
+}
+
+output "action_group_cost_tools_lambda" {
+  description = "Lambda ARN for the cost_tools Bedrock action group."
+  value       = aws_lambda_function.cost_tools.arn
+}
+
+output "action_group_tagging_tools_lambda" {
+  description = "Lambda ARN for the tagging_tools Bedrock action group."
+  value       = aws_lambda_function.tagging_tools.arn
+}
+
+output "knowledge_base_id" {
+  description = "Bedrock Knowledge Base ID (null if disabled)."
+  value       = var.enable_knowledge_base ? aws_bedrockagent_knowledge_base.finops[0].id : null
+}
+
+output "knowledge_base_corpus_bucket" {
+  description = "S3 bucket for knowledge-base documents (drop runbooks here)."
+  value       = var.enable_knowledge_base ? aws_s3_bucket.kb_corpus[0].id : null
+}
+
+output "opensearch_collection_endpoint" {
+  description = "OpenSearch Serverless collection endpoint for the KB vector store."
+  value       = var.enable_knowledge_base ? aws_opensearchserverless_collection.kb[0].collection_endpoint : null
+}
+
+output "guardrail_id" {
+  description = "Bedrock Guardrail ID (null if disabled)."
+  value       = var.enable_guardrails ? aws_bedrock_guardrail.finops[0].guardrail_id : null
+}
+
+output "guardrail_version" {
+  description = "Bedrock Guardrail published version."
+  value       = var.enable_guardrails ? aws_bedrock_guardrail_version.finops[0].version : null
+}
+
 output "anomaly_monitor_arn" {
   description = "Cost Anomaly Detection monitor ARN"
   value       = aws_ce_anomaly_monitor.finops.arn

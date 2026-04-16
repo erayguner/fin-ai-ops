@@ -1,0 +1,50 @@
+{
+  "policy_id": "tagging-aws-ai-ml-2026",
+  "name": "AWS AI/ML Workload Tagging Policy",
+  "description": "Stricter tagging for AWS generative-AI and ML workloads (Bedrock, SageMaker, Q Business). These workloads accrue cost faster than traditional compute and must be attributable to a model family, workload class, and training/inference phase for chargeback and responsible-AI audit.",
+  "provider": "aws",
+  "resource_types": [
+    "bedrock:custom-model",
+    "bedrock:provisioned-throughput",
+    "bedrock:agent",
+    "bedrock:knowledge-base",
+    "bedrock:guardrail",
+    "bedrock:flow",
+    "sagemaker:endpoint",
+    "sagemaker:training-job",
+    "sagemaker:notebook-instance",
+    "sagemaker:pipeline",
+    "sagemaker:hyperpod-cluster",
+    "sagemaker:feature-group",
+    "sagemaker:model-package",
+    "q-business:application"
+  ],
+  "required_tags": [
+    "team",
+    "cost-centre",
+    "environment",
+    "owner",
+    "application",
+    "managed-by",
+    "data-classification",
+    "model-family",
+    "workload-class",
+    "ai-workload-phase"
+  ],
+  "recommended_tags": [
+    "model-version",
+    "training-run-id",
+    "responsible-ai-review"
+  ],
+  "tag_value_patterns": {
+    "cost-centre": "CC-[0-9]{4}",
+    "environment": "prod|staging|dev|sandbox|shared",
+    "data-classification": "public|internal|confidential|restricted",
+    "workload-class": "training|fine-tuning|inference|evaluation|rag",
+    "ai-workload-phase": "research|pilot|production|deprecated"
+  },
+  "severity_when_missing": "critical",
+  "enabled": true,
+  "created_at": "2026-04-16T00:00:00+00:00",
+  "updated_at": "2026-04-16T00:00:00+00:00"
+}
