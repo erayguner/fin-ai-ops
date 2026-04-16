@@ -28,6 +28,8 @@ env/
 *.tfstate
 *.tfstate.backup
 *.tfvars
+# Build artefacts emitted by archive_file data sources
+providers/*/terraform/.build/
 !*.tfvars.example
 
 # Audit logs (contain operational data, not source)

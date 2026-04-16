@@ -1,0 +1,43 @@
+{
+  "policy_id": "tagging-aws-default-2026",
+  "name": "AWS 2026 Default Tagging Policy",
+  "description": "Baseline tagging for every AWS resource (FinOps Foundation 2026 minimum set). Covers cost attribution (team, cost-centre), lifecycle (environment, managed-by), ownership (owner, application), and compliance (data-classification). Resource-type-scoped policies may add further requirements.",
+  "provider": "aws",
+  "required_tags": [
+    "team",
+    "cost-centre",
+    "environment",
+    "owner",
+    "application",
+    "managed-by",
+    "data-classification"
+  ],
+  "recommended_tags": [
+    "business-unit",
+    "project",
+    "compliance-scope",
+    "expiry-date"
+  ],
+  "resource_types": [],
+  "exempt_resource_types": [
+    "s3:object",
+    "ec2:spot-price",
+    "route53:hostedzone-record",
+    "iam:policy-version",
+    "cost-explorer:report",
+    "support:case",
+    "trusted-advisor:check",
+    "health:event"
+  ],
+  "tag_value_patterns": {
+    "cost-centre": "CC-[0-9]{4}",
+    "environment": "prod|staging|dev|sandbox|shared",
+    "data-classification": "public|internal|confidential|restricted",
+    "managed-by": "terraform|cloudformation|cdk|pulumi|manual",
+    "expiry-date": "[0-9]{4}-[0-9]{2}-[0-9]{2}|none"
+  },
+  "severity_when_missing": "warning",
+  "enabled": true,
+  "created_at": "2026-04-16T00:00:00+00:00",
+  "updated_at": "2026-04-16T00:00:00+00:00"
+}
