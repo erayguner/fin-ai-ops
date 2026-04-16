@@ -9,17 +9,17 @@ Autonomous cost governance for AWS and GCP using **provider-native agent framewo
 
 ## Architecture
 
-Each cloud provider uses its **own native agent solution**:
+Each cloud provider uses its **own native agent solution** (2026 stack):
 
-| Provider | Agent Framework | MCP Servers | Auth Model |
-|----------|----------------|-------------|------------|
-| **AWS** | Amazon Bedrock Agents | [awslabs/mcp](https://github.com/awslabs/mcp) (Cost Explorer, CloudWatch, CloudFormation) | IAM roles only |
-| **GCP** | Google ADK (Agent Development Kit) | [google/mcp](https://github.com/google/mcp) (BigQuery, Resource Manager) | WIF / ADC only |
+| Provider | Agent Framework | Native Capabilities | Auth Model |
+|----------|----------------|---------------------|------------|
+| **AWS** | Amazon Bedrock Agents + AgentCore | Action Groups (OpenAPI), Knowledge Base (OpenSearch Serverless + Titan v2), Guardrails, Production Alias | IAM roles only |
+| **GCP** | Google ADK + Vertex AI Agent Builder | Cloud Run v2 runtime, Vertex AI Vector Search, Discovery Engine chat engine, Gemini 2.5 | WIF / ADC only |
 
-Aligned with **UK NCSC Secure by Design** principles. **Terraform >= 1.14** with latest provider versions.
+Aligned with **UK NCSC Secure by Design** principles. **Terraform >= 1.14** with AWS provider >= 6.0 and Google provider >= 6.0.
 
 ```
-finops-automation-hub/
+fin-ai-ops/
 ├── core/                           # Shared core engine
 │   ├── models.py                   # Pydantic data models (schema-versioned)
 │   ├── config.py                   # Layered config: defaults → YAML → env vars
@@ -33,42 +33,43 @@ finops-automation-hub/
 │   ├── lifecycle.py                # Agent state machine (EDA pattern)
 │   ├── alerts.py                   # Contextualised alert generation
 │   ├── audit.py                    # Immutable audit trail (SHA-256 chain)
-│   └── policies.py                 # Cost governance policy engine
+│   ├── policies.py                 # Cost governance policy engine
+│   └── tagging.py                  # Tagging governance domain (policies, taggability, audits)
 ├── providers/
 │   ├── base.py                     # Provider interface (ABC)
 │   ├── aws/
-│   │   ├── agents/
-│   │   │   └── finops_agent.py     # Bedrock Agent + action groups
-│   │   ├── mcp_integration/
-│   │   │   └── aws_mcp_config.py   # awslabs/mcp server configs
+│   │   ├── agents/finops_agent.py  # Bedrock Agent + action groups
+│   │   ├── mcp_integration/        # awslabs/mcp server configs
 │   │   ├── cost_analyzer.py        # AWS cost estimation
-│   │   ├── resources.py            # AWS resource catalogue (14 types)
+│   │   ├── resources.py            # AWS resource catalogue
 │   │   ├── listener.py             # CloudTrail event listener
-│   │   └── terraform/              # AWS IaC (Bedrock Agent, CloudTrail, EventBridge)
+│   │   └── terraform/              # AWS IaC (Bedrock Agent + KB + Guardrails + Alias)
 │   └── gcp/
-│       ├── agents/
-│       │   └── finops_agent.py     # Google ADK Agent + tools
-│       ├── mcp_integration/
-│       │   └── google_mcp_config.py # google/mcp server configs
+│       ├── agents/finops_agent.py  # Google ADK Agent + tools
+│       ├── mcp_integration/        # google/mcp server configs
 │       ├── cost_analyzer.py        # GCP cost estimation
-│       ├── resources.py            # GCP resource catalogue (13 types)
+│       ├── resources.py            # GCP resource catalogue
 │       ├── listener.py             # Cloud Audit Log listener
-│       └── terraform/              # GCP IaC (Vertex AI, Pub/Sub, WIF)
+│       └── terraform/              # GCP IaC (Cloud Run ADK runtime + Vector Search + Agent Builder)
 ├── agents/                         # Shared agent orchestration
 │   ├── cost_monitor.py             # Cross-provider cost monitoring
 │   ├── alert_agent.py              # Alert lifecycle + event persistence
 │   ├── report_agent.py             # Periodic cost reporting
 │   ├── health_agent.py             # Self-monitoring health probes
-│   └── reconciliation_agent.py     # Data drift detection & auto-repair
-├── mcp_server/
-│   └── server.py                   # Hub MCP server (20 tools)
-├── policies/                       # Default governance policies (JSON)
+│   ├── reconciliation_agent.py     # Data drift detection & auto-repair
+│   └── tagging_health_agent.py     # Weekly tagging compliance governance
+├── mcp_server/server.py            # Hub MCP server
+├── policies/                       # Cost governance policies (JSON)
+│   └── tagging/                    # Per-provider tagging/labelling policies
 ├── scripts/
-│   └── preflight_check.py          # Pre-flight validation (--all/--aws/--gcp)
+│   ├── preflight_check.py          # Pre-flight validation (--all/--aws/--gcp)
+│   ├── validate_policies.py        # CostPolicy schema validator
+│   ├── drift_check.py              # Terraform-to-policy alignment
+│   └── repo_health.py              # Full repo health check
 ├── docs/                           # Getting started & troubleshooting guides
-├── tests/                          # 367 tests
+├── tests/                          # 522 tests
 ├── SECURITY.md                     # Security policy & vulnerability reporting
-└── audit_store/                    # Append-only audit logs (JSONL)
+└── audit_store/                    # Append-only audit logs (JSONL, runtime)
 ```
 
 ## Pluggable Abstractions
@@ -86,32 +87,32 @@ All configuration is externalised — thresholds, required tags, escalation time
 
 ## Native Agent Frameworks
 
-### AWS — Amazon Bedrock Agents
+### AWS — Amazon Bedrock Agents (AgentCore-aligned)
 
-The AWS module uses [Amazon Bedrock Agents](https://docs.aws.amazon.com/bedrock/latest/userguide/agents.html) with action groups:
+The AWS Terraform module deploys a full 2026 Bedrock agent stack:
 
-- **CostAnalysis** — `analyse_cost_and_usage()`, `detect_cost_anomalies()`
-- **Compliance** — `check_tag_compliance()`
-- **Optimisation** — `get_savings_recommendations()`, `get_budget_alerts()`
-
-Deployed via Terraform (`aws_bedrockagent_agent`). Uses Claude on Bedrock as the foundation model. Auth via IAM roles — **zero API keys**.
+- **Agent + Production Alias** (`aws_bedrockagent_agent` + `aws_bedrockagent_agent_alias`) — blue/green promotion target.
+- **Action Groups** — `cost_tools` and `tagging_tools`, Lambda-backed, OpenAPI 3.0 schemas.
+- **Knowledge Base** — OpenSearch Serverless VECTORSEARCH collection + S3 corpus, Titan v2 embeddings.
+- **Guardrails** — PII blocking (AWS keys, SSN, CC), content filters, prompt-attack detection.
+- Foundation model: Claude Sonnet 4.5 on Bedrock. Auth via IAM roles — **zero API keys**.
 
 **AWS MCP Servers** ([awslabs/mcp](https://github.com/awslabs/mcp)):
 - `awslabs.cost-explorer-mcp-server` — Cost and usage queries
 - `awslabs.cloudwatch-mcp-server` — Metrics and alarms
 - `awslabs.cloudformation-mcp-server` — Infrastructure queries
 
-### GCP — Google Agent Development Kit (ADK)
+### GCP — Google ADK + Vertex AI Agent Builder
 
-The GCP module uses [Google ADK](https://docs.cloud.google.com/agent-builder/agent-development-kit/overview) with Gemini:
+The GCP Terraform module deploys a 2026 ADK-native runtime:
 
-- `analyse_billing_costs()` — BigQuery billing export queries
-- `detect_costly_resources()` — Cloud Asset Inventory scanning
-- `check_label_compliance()` — Label policy enforcement
-- `get_budget_status()` — Cloud Billing Budget API
-- `recommend_cost_optimisations()` — GCP Recommender API
+- **Cloud Run v2 service** — ADK agent server with Gemini 2.5 Pro, stateful sessions, WIF-bound service account.
+- **Vertex AI Vector Search** — tree-AH index + public endpoint for RAG retrieval.
+- **Vertex AI Agent Builder** — Discovery Engine data store + chat engine for conversational grounding.
+- **Artifact Registry** — immutable Docker repository for the ADK container image.
+- **Secret Manager** — ADK runtime config (non-credential; WIF covers identity).
 
-Deployed to Vertex AI Agent Engine. Auth via WIF — **zero service account keys**.
+Auth via WIF — **zero service account keys**.
 
 **Google MCP Servers** ([google/mcp](https://github.com/google/mcp)):
 - BigQuery MCP — Billing data queries and AI forecasting
@@ -176,7 +177,7 @@ pip install -e ".[gcp]"     # GCP + Google ADK
 pip install -e ".[aws]"     # AWS + boto3
 pip install -e ".[dev]"     # Development tools
 
-# Run tests (367 tests, < 1 second)
+# Run tests (522 tests, ~11s)
 pytest
 
 # Run pre-flight checks
@@ -285,9 +286,20 @@ Five MCP tools expose these capabilities: `finops_health_check`, `finops_reconci
 
 ## Default Policies
 
-1. **Mandatory Resource Tagging** — team, cost-centre, environment, owner
-2. **High-Cost Resource Approval** — $2,000/month approval, $5,000/month hard limit
-3. **GPU Instance Governance** — Extra scrutiny for GPU workloads
+The hub ships with 16 cost policies (`policies/*.json`) and 4 tagging policies (`policies/tagging/*.json`):
+
+**Cost policies** — high-cost approval gates, GPU governance, dev-env caps, database governance, AI/ML training caps, K8s node pools, storage lifecycle, spot/preemptible mandate, carbon-aware placement, commitment coverage, anomaly SLAs, multi-account budgets, unit economics, auto-shutdown schedules, data transfer, and mandatory tagging.
+
+**Tagging policies (2026 FinOps Foundation)** — per-provider required tags (`team`, `cost-centre`/`cost_centre`, `environment`, `owner`, `application`, `managed-by`, `data-classification`), with stricter `critical`-severity policies for AI/ML workloads (Bedrock, SageMaker, Vertex AI, Discovery Engine) requiring `model-family`, `workload-class`, and `ai-workload-phase` tags.
+
+## Tagging Governance
+
+The `TaggingHealthAgent` (`agents/tagging_health_agent.py`) runs weekly compliance scans across both providers:
+
+- Resolves per-provider `TaggingPolicy` for each resource (or skips if exempt/non-taggable).
+- Classifies resources as `compliant`, `non_compliant`, `non_taggable`, or `exempt`.
+- Distinguishes provider-native non-taggable types (e.g. `route53:hostedzone-record`, `iam.serviceaccounts`) using the built-in taggability registry (~100 AWS + ~70 GCP resource types covered).
+- Generates a weekly `TaggingHealthReport` with compliance trend, unattributed monthly spend, remediation priorities ranked by cost, and actionable recommendations.
 
 ## Documentation
 
