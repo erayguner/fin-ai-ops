@@ -4,8 +4,7 @@ Configures native Google MCP servers for use with the GCP FinOps agent.
 All servers authenticate via Application Default Credentials or
 Workload Identity Federation — no API keys.
 
-Google MCP servers available: https://github.com/google/mcp
-Remote MCP servers managed by Google: https://docs.cloud.google.com/mcp/overview
+Reference: https://docs.cloud.google.com/mcp/overview
 """
 
 from __future__ import annotations
@@ -13,6 +12,13 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = ["get_adk_mcp_toolset_config", "get_claude_code_mcp_config", "get_google_mcp_servers"]
+
+
+# Per https://docs.cloud.google.com/bigquery/docs/use-bigquery-mcp the
+# BigQuery MCP server is the production endpoint we rely on. There is no
+# "Resource Manager MCP" server published by Google; using a stub URL
+# previously made the integration silently unreachable.
+BIGQUERY_MCP_ENDPOINT = "https://bigquery.googleapis.com/mcp"
 
 
 def get_google_mcp_servers() -> list[dict[str, Any]]:
@@ -30,16 +36,15 @@ def get_google_mcp_servers() -> list[dict[str, Any]]:
             "name": "google-bigquery-mcp",
             "description": (
                 "Google BigQuery MCP server for billing data analysis. "
-                "Supports SQL queries, schema inspection, and AI forecasting."
+                "Supports SQL queries, schema inspection, and metadata lookup."
             ),
             "type": "remote",
-            "endpoint": "https://mcp.googleapis.com/v1alpha/sse",
+            "transport": "http",
+            "endpoint": BIGQUERY_MCP_ENDPOINT,
             "tools": [
                 "list_dataset_ids",
                 "get_table_info",
                 "execute_sql",
-                "forecast",
-                "ask_data_insights",
             ],
             "auth": {
                 "type": "oauth2",
@@ -50,38 +55,25 @@ def get_google_mcp_servers() -> list[dict[str, Any]]:
             },
             "use_case": "Query billing export data in BigQuery for cost analysis",
         },
-        {
-            "name": "google-resource-manager-mcp",
-            "description": (
-                "Google Cloud Resource Manager MCP server for project and "
-                "resource hierarchy management."
-            ),
-            "type": "remote",
-            "endpoint": "https://mcp.googleapis.com/v1alpha/sse",
-            "auth": {
-                "type": "oauth2",
-                "method": "application_default_credentials",
-                "scopes": [
-                    "https://www.googleapis.com/auth/cloud-platform.read-only",
-                ],
-            },
-            "use_case": "Inspect project hierarchy, labels, and IAM policies",
-        },
     ]
 
 
 def get_adk_mcp_toolset_config() -> dict[str, Any]:
-    """Return ADK MCPToolset configuration for Google MCP servers.
+    """Return ADK McpToolset configuration for Google MCP servers.
 
-    This configuration is used with google.adk.tools.mcp_tool.MCPToolset
-    to integrate Google's remote MCP servers into ADK agents.
+    This configuration is used with ``google.adk.tools.mcp_tool.McpToolset``
+    and ``StreamableHTTPConnectionParams`` from
+    ``google.adk.tools.mcp_tool.mcp_session_manager``.
 
     Example usage:
-        from google.adk.tools.mcp_tool import MCPToolset, SseServerParams
+        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
 
         config = get_adk_mcp_toolset_config()
-        bigquery_tools = MCPToolset(
-            connection_params=SseServerParams(
+        bigquery_tools = McpToolset(
+            connection_params=StreamableHTTPConnectionParams(
                 url=config["bigquery"]["url"],
                 headers=config["bigquery"]["headers"],
             ),
@@ -89,19 +81,13 @@ def get_adk_mcp_toolset_config() -> dict[str, Any]:
     """
     return {
         "bigquery": {
-            "url": "https://mcp.googleapis.com/v1alpha/sse",
+            "url": BIGQUERY_MCP_ENDPOINT,
             "headers": {
                 "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
                 # Auth header is injected by ADC/WIF at runtime
             },
             "description": "BigQuery MCP for billing data queries",
-        },
-        "resource_manager": {
-            "url": "https://mcp.googleapis.com/v1alpha/sse",
-            "headers": {
-                "Content-Type": "application/json",
-            },
-            "description": "Resource Manager MCP for project inspection",
         },
     }
 

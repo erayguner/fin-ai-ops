@@ -11,7 +11,7 @@ variable "multi_region" {
 }
 
 variable "kms_key_arn" {
-  description = "KMS key ARN for encryption at rest"
+  description = "KMS key ARN for encryption at rest (CloudTrail, SNS, CloudWatch Logs, KB bucket)."
   type        = string
 }
 
@@ -34,9 +34,35 @@ variable "monthly_budget_usd" {
 }
 
 variable "bedrock_model_id" {
-  description = "Foundation model ID for the Bedrock FinOps agent"
+  description = <<-EOT
+    Bedrock Agent foundation model. Claude Sonnet 4 / 4.5 are only served via
+    cross-region inference profiles (see
+    docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html), so
+    this must be an inference-profile identifier — e.g.
+    `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` or
+    `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. Match the prefix to your
+    deployment region's geography.
+  EOT
   type        = string
-  default     = "anthropic.claude-sonnet-4-20250514"
+  default     = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+
+variable "bedrock_embedding_model_id" {
+  description = "Embedding model for the Knowledge Base (Titan v2 by default)."
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
+}
+
+variable "enable_knowledge_base" {
+  description = "Provision Bedrock Knowledge Base (OpenSearch Serverless + S3 corpus)."
+  type        = bool
+  default     = true
+}
+
+variable "enable_guardrails" {
+  description = "Provision Bedrock Guardrail (PII + content filters) and attach to agent."
+  type        = bool
+  default     = true
 }
 
 variable "anomaly_threshold_usd" {

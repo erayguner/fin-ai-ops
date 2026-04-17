@@ -223,7 +223,7 @@ The pre-flight script validates:
 - KMS key accessibility (AWS)
 - API enablement (GCP)
 - MCP server tool availability
-- Test suite passes (442 tests)
+- Test suite passes (539 tests)
 
 Fix any failures before proceeding. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues.
 
@@ -238,12 +238,17 @@ cd providers/aws/terraform
 
 # Create your variable file
 cat > terraform.tfvars <<'EOF'
-name_prefix           = "finops"
-kms_key_arn           = "arn:aws:kms:eu-west-2:123456789012:key/your-key-id"
-alert_email_addresses = ["finops-team@example.com"]
-monthly_budget_usd    = 10000
-bedrock_model_id      = "anthropic.claude-sonnet-4-20250514"
-anomaly_threshold_usd = 100
+name_prefix                 = "finops"
+kms_key_arn                 = "arn:aws:kms:eu-west-2:123456789012:key/your-key-id"
+alert_email_addresses       = ["finops-team@example.com"]
+monthly_budget_usd          = 10000
+# Claude Sonnet 4 / 4.5 are cross-region inference-profile only. Prefix with
+# eu./us./etc. to match your deployment region (see AWS Bedrock docs).
+bedrock_model_id            = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+bedrock_embedding_model_id  = "amazon.titan-embed-text-v2:0"
+enable_knowledge_base       = true
+enable_guardrails           = true
+anomaly_threshold_usd       = 100
 
 # Optional: GitHub Actions OIDC
 enable_github_oidc = true
@@ -272,8 +277,15 @@ terraform apply tfplan
 ```bash
 terraform output
 # Save these values:
-# - bedrock_agent_id
-# - bedrock_agent_arn
+# - bedrock_agent_id                  # agent identifier
+# - bedrock_agent_alias_id            # invoke this alias from applications
+# - bedrock_agent_alias_arn
+# - action_group_cost_tools_lambda    # Lambda backing cost_tools action group
+# - action_group_tagging_tools_lambda # Lambda backing tagging_tools action group
+# - knowledge_base_id
+# - knowledge_base_corpus_bucket      # drop FinOps runbooks here for RAG
+# - opensearch_collection_endpoint
+# - guardrail_id + guardrail_version
 # - sns_topic_arn
 # - anomaly_monitor_arn
 ```
@@ -282,11 +294,16 @@ terraform output
 
 | Resource | Purpose |
 |----------|---------|
-| CloudTrail | Captures resource creation events |
-| S3 Bucket | Stores CloudTrail logs (encrypted, versioned) |
+| CloudTrail | Captures 2026 resource creation events (incl. SageMaker, Bedrock, EMR Serverless, OpenSearch) |
+| S3 Bucket (trail) | Stores CloudTrail logs (encrypted, versioned) |
+| S3 Bucket (KB corpus) | Runbook / policy / escalation-ownership documents for RAG |
 | EventBridge Rule | Routes creation events to SNS |
 | SNS Topic | Alert distribution (encrypted) |
-| Bedrock Agent | FinOps governance AI agent |
+| Bedrock Agent + Alias | FinOps governance AI agent (blue/green production alias) |
+| Bedrock Action Groups | `cost_tools` + `tagging_tools` Lambda-backed OpenAPI tools |
+| Bedrock Knowledge Base | OpenSearch Serverless vector store (Titan v2 embeddings) |
+| Bedrock Guardrail | PII blocking + content filters + prompt-attack detection |
+| Lambda Functions | Action-group backends (stub handlers; replace with project code) |
 | Cost Anomaly Monitor | Detects unusual spending |
 | Budget Alarm | 80%/100% budget notifications |
 | OIDC Provider | Keyless GitHub Actions auth (optional) |
@@ -301,11 +318,20 @@ terraform output
 cd providers/gcp/terraform
 
 cat > terraform.tfvars <<'EOF'
-project_id         = "your-gcp-project-id"
-region             = "europe-west2"
-name_prefix        = "finops"
-billing_account_id = "012345-6789AB-CDEF01"  # Optional
-monthly_budget_usd = 10000
+project_id          = "your-gcp-project-id"
+region              = "europe-west2"
+name_prefix         = "finops"
+company_name        = "Acme Corp"
+billing_account_id  = "012345-6789AB-CDEF01"  # Optional
+monthly_budget_usd  = 10000
+
+# ADK agent runtime (2026 Google ADK / Agent Builder stack)
+gemini_model             = "gemini-2.5-pro"
+embedding_dimensions     = 768
+adk_agent_image          = "europe-west2-docker.pkg.dev/YOUR_PROJECT/finops-adk-agent/agent:v1"
+enable_cloud_run_runtime = true
+enable_vector_search     = true
+enable_agent_builder     = true
 
 # Optional: GitHub Actions WIF
 enable_wif        = true
@@ -337,7 +363,13 @@ terraform output
 # - pubsub_topic
 # - bigquery_dataset
 # - finops_hub_service_account
-# - vertex_agent_service_account
+# - adk_agent_service_account            # runs the ADK agent on Cloud Run
+# - adk_artifact_registry_repo           # push your ADK container image here
+# - adk_artifacts_bucket                 # RAG corpus + session state
+# - adk_config_secret                    # Secret Manager config
+# - adk_cloud_run_url                    # ADK runtime HTTPS endpoint
+# - vector_search_index_id / endpoint_id # Vertex AI Vector Search
+# - agent_builder_engine_id              # Discovery Engine chat engine
 ```
 
 ### What Gets Created
@@ -345,12 +377,18 @@ terraform output
 | Resource | Purpose |
 |----------|---------|
 | Pub/Sub Topic + Subscription | Alert distribution |
-| Log Sink | Routes resource creation audit logs to Pub/Sub |
+| Log Sink | Routes 2026 resource creation events to Pub/Sub (Compute, AlloyDB, Cloud Run, Vertex AI, BigQuery) |
 | BigQuery Dataset | Billing export storage |
-| Service Accounts (2) | Hub + Vertex AI agent (keyless, WIF) |
+| Service Accounts (2) | `finops-hub` + `adk-agent` (keyless, WIF) |
+| Artifact Registry (Docker) | ADK agent container image repository |
+| Cloud Run v2 Service | ADK agent runtime (Gemini 2.5 Pro, WIF-bound) |
+| GCS Bucket | ADK session state + RAG corpus (versioned, public-access-prevented) |
+| Secret Manager Secret | ADK runtime config (non-credential) |
+| Vertex AI Vector Search | Tree-AH index + endpoint for RAG retrieval |
+| Discovery Engine | Data store + chat engine (Vertex AI Agent Builder) |
 | WIF Pool + Provider | Keyless GitHub Actions auth (optional) |
 | Budget Alert | 50%/80%/100% budget notifications |
-| Required APIs | Logging, Monitoring, Pub/Sub, BigQuery, etc. |
+| Required APIs | Logging, Monitoring, Pub/Sub, BigQuery, AI Platform, Discovery Engine, Cloud Run, etc. |
 
 ---
 
@@ -398,18 +436,14 @@ Add to your Claude Code settings (`.claude/settings.json`):
 
 ### 7.3 GCP Native MCP Servers
 
-Google's remote MCP servers are accessed via the ADK agent automatically. For direct use:
-
-```json
-{
-  "mcpServers": {
-    "google-bigquery": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-google-cloud", "--project", "your-project-id", "--service", "bigquery"]
-    }
-  }
-}
-```
+The ADK agent calls Google's remote MCP endpoints directly via
+`StreamableHTTPConnectionParams`. For direct use from an MCP host, register
+the BigQuery MCP server endpoint
+(`https://bigquery.googleapis.com/mcp`, per
+[docs.cloud.google.com/bigquery/docs/use-bigquery-mcp](https://docs.cloud.google.com/bigquery/docs/use-bigquery-mcp));
+transport is HTTP and authentication is OAuth 2.0 via ADC/WIF. Consult your
+MCP host's docs for the exact remote-server registration form — there is no
+officially published local `npx` server for Google Cloud at this time.
 
 ---
 
