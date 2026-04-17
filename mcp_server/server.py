@@ -31,6 +31,7 @@ from agents.report_agent import ReportAgent
 from core.audit import AuditLogger
 from core.config import HubConfig
 from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
+from core.filters import redact_arguments as _filters_redact_arguments
 from core.models import (
     ActionStatus,
     CloudProvider,
@@ -874,18 +875,14 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any
 
 
 def _redact_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Redact potentially sensitive fields from audit log arguments."""
-    redacted = dict(arguments)
-    sensitive_keys = {"creator_email", "creator_identity", "acknowledged_by", "resolved_by"}
-    for key in sensitive_keys:
-        if redacted.get(key):
-            value = str(redacted[key])
-            if "@" in value:
-                # Redact email to first char + ***@domain
-                parts = value.split("@")
-                redacted[key] = f"{parts[0][0]}***@{parts[1]}"
-            elif len(value) > 10:
-                redacted[key] = f"{value[:8]}..."
+    """Redact potentially sensitive fields from audit log arguments.
+
+    Routes through :func:`core.filters.redact_arguments` so the same
+    PII / credential scanners protect every audit write, notification,
+    and transcript (ADR-008 §6). The old hardcoded 4-key redactor was
+    a subset of what ``PIIRedactor`` already covers.
+    """
+    redacted, _categories = _filters_redact_arguments(arguments)
     return redacted
 
 
