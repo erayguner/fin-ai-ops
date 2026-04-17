@@ -115,9 +115,8 @@ The GCP Terraform module deploys a 2026 ADK-native runtime:
 
 Auth via WIF — **zero service account keys**.
 
-**Google MCP Servers** ([google/mcp](https://github.com/google/mcp)):
-- BigQuery MCP — Billing data queries and AI forecasting
-- Cloud Resource Manager MCP — Project and resource hierarchy
+**Google MCP Servers** ([docs.cloud.google.com/mcp/overview](https://docs.cloud.google.com/mcp/overview)):
+- BigQuery MCP (`https://bigquery.googleapis.com/mcp`) — Billing data queries via streamable HTTP, OAuth 2.0 via ADC/WIF
 
 ## Zero API Keys Architecture
 

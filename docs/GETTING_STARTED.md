@@ -242,7 +242,9 @@ name_prefix                 = "finops"
 kms_key_arn                 = "arn:aws:kms:eu-west-2:123456789012:key/your-key-id"
 alert_email_addresses       = ["finops-team@example.com"]
 monthly_budget_usd          = 10000
-bedrock_model_id            = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+# Claude Sonnet 4 / 4.5 are cross-region inference-profile only. Prefix with
+# eu./us./etc. to match your deployment region (see AWS Bedrock docs).
+bedrock_model_id            = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 bedrock_embedding_model_id  = "amazon.titan-embed-text-v2:0"
 enable_knowledge_base       = true
 enable_guardrails           = true
@@ -434,18 +436,14 @@ Add to your Claude Code settings (`.claude/settings.json`):
 
 ### 7.3 GCP Native MCP Servers
 
-Google's remote MCP servers are accessed via the ADK agent automatically. For direct use:
-
-```json
-{
-  "mcpServers": {
-    "google-bigquery": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-google-cloud", "--project", "your-project-id", "--service", "bigquery"]
-    }
-  }
-}
-```
+The ADK agent calls Google's remote MCP endpoints directly via
+`StreamableHTTPConnectionParams`. For direct use from an MCP host, register
+the BigQuery MCP server endpoint
+(`https://bigquery.googleapis.com/mcp`, per
+[docs.cloud.google.com/bigquery/docs/use-bigquery-mcp](https://docs.cloud.google.com/bigquery/docs/use-bigquery-mcp));
+transport is HTTP and authentication is OAuth 2.0 via ADC/WIF. Consult your
+MCP host's docs for the exact remote-server registration form — there is no
+officially published local `npx` server for Google Cloud at this time.
 
 ---
 

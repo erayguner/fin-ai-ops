@@ -40,15 +40,26 @@ __all__ = [
 
 
 def analyse_billing_costs(
-    project_id: str,
+    bq_project: str,
+    bq_dataset: str,
+    billing_account_id: str,
+    project_id: str | None = None,
     period: str = "LAST_30_DAYS",
 ) -> dict[str, Any]:
     """Query GCP billing data from BigQuery billing export.
 
     Uses Application Default Credentials or Workload Identity — never API keys.
 
+    The billing-export table lives in the *host* project of the BigQuery
+    dataset (not the project being analysed) and is named
+    ``gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`` (hyphens replaced with
+    underscores). See docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables.
+
     Args:
-        project_id: GCP project ID to analyse.
+        bq_project: Project that hosts the BigQuery billing dataset.
+        bq_dataset: Dataset name containing the export table.
+        billing_account_id: Billing account ID (e.g. ``XXXXXX-XXXXXX-XXXXXX``).
+        project_id: Optional project to scope the results to.
         period: Time period — LAST_7_DAYS, LAST_30_DAYS, LAST_90_DAYS, or YYYY-MM.
 
     Returns:
@@ -60,6 +71,14 @@ def analyse_billing_costs(
         client = bigquery.Client()  # Uses ADC/WIF — no keys
 
         period_clause = _build_period_clause(period)
+        table_suffix = billing_account_id.replace("-", "_")
+        table_ref = f"{bq_project}.{bq_dataset}.gcp_billing_export_v1_{table_suffix}"
+        params: list[bigquery.ScalarQueryParameter] = []
+        project_clause = ""
+        if project_id:
+            project_clause = " AND project.id = @project_id"
+            params.append(bigquery.ScalarQueryParameter("project_id", "STRING", project_id))
+
         query = f"""
             SELECT
                 service.description AS service,
@@ -67,13 +86,14 @@ def analyse_billing_costs(
                 SUM(cost) AS total_cost,
                 SUM(usage.amount) AS total_usage,
                 usage.unit AS usage_unit
-            FROM `{project_id}.billing_export.gcp_billing_export_v1_*`
-            WHERE {period_clause}
+            FROM `{table_ref}`
+            WHERE {period_clause}{project_clause}
             GROUP BY service, sku, usage_unit
             ORDER BY total_cost DESC
             LIMIT 50
         """  # noqa: S608  # nosec B608
-        results = client.query(query).result()
+        job_config = bigquery.QueryJobConfig(query_parameters=params) if params else None
+        results = client.query(query, job_config=job_config).result()
         rows = [dict(row) for row in results]
 
         total = sum(r.get("total_cost", 0) for r in rows)
@@ -84,6 +104,9 @@ def analyse_billing_costs(
 
         return {
             "status": "success",
+            "bq_project": bq_project,
+            "bq_dataset": bq_dataset,
+            "billing_account_id": billing_account_id,
             "project_id": project_id,
             "period": period,
             "total_cost_usd": round(total, 2),
@@ -235,34 +258,58 @@ def check_label_compliance(
 
 
 def get_budget_status(
-    project_id: str,
+    billing_account_id: str,
 ) -> dict[str, Any]:
-    """Get current budget status and alerts for a GCP project.
+    """Get current budgets for a Cloud Billing account.
 
-    Uses the Cloud Billing Budget API with ADC/WIF authentication.
+    Budgets are scoped to a billing account, not a project — see
+    docs.cloud.google.com/billing/docs/how-to/budget-api. Uses the Cloud
+    Billing Budget API with ADC/WIF authentication.
 
     Args:
-        project_id: GCP project to check budgets for.
+        billing_account_id: Billing account ID (e.g. ``XXXXXX-XXXXXX-XXXXXX``).
 
     Returns:
-        dict with budgets, spend vs limit, and any threshold breaches.
+        dict with budgets list (display name, amount, threshold rules).
     """
     try:
-        from google.cloud import billing_budgets_v1  # type: ignore[attr-defined]
+        from google.cloud.billing import budgets
 
-        billing_budgets_v1.BudgetServiceClient()  # Verify credentials/import
-        # List budgets for the billing account associated with the project
-        budgets: list[dict] = []
+        client = budgets.BudgetServiceClient()
+        parent = f"billingAccounts/{billing_account_id}"
+        results: list[dict[str, Any]] = []
+        for budget in client.list_budgets(request={"parent": parent}):
+            amount = budget.amount
+            entry: dict[str, Any] = {
+                "name": budget.name,
+                "display_name": budget.display_name,
+                "threshold_rules": [
+                    {
+                        "threshold_percent": rule.threshold_percent,
+                        "spend_basis": rule.spend_basis.name
+                        if rule.spend_basis
+                        else "UNSPECIFIED",
+                    }
+                    for rule in budget.threshold_rules
+                ],
+            }
+            if "specified_amount" in amount:
+                entry["specified_amount_units"] = amount.specified_amount.units
+                entry["currency_code"] = amount.specified_amount.currency_code
+            elif "last_period_amount" in amount:
+                entry["dynamic_last_period_amount"] = True
+            results.append(entry)
 
         return {
             "status": "success",
-            "project_id": project_id,
-            "budgets": budgets,
-            "message": "Budget data retrieved via Cloud Billing Budget API (WIF auth)",
+            "billing_account_id": billing_account_id,
+            "budgets": results,
+            "total_budgets": len(results),
         }
     except ImportError:
         return {"status": "unavailable", "message": "google-cloud-billing-budgets not installed"}
     except Exception as e:
+        logger.exception("Failed to list budgets")
         return {"status": "error", "message": str(e)}
 
 
@@ -381,21 +428,26 @@ All your actions are audited for governance compliance.""",
 def create_gcp_finops_agent_with_mcp():
     """Create a GCP FinOps ADK agent with Google's native MCP servers.
 
-    Integrates:
-    - BigQuery MCP server for billing data queries
-    - Cloud Resource Manager MCP server for project/resource management
-
-    Reference: https://github.com/google/mcp
+    Integrates the BigQuery MCP server for billing data queries. Per
+    docs.cloud.google.com/bigquery/docs/use-bigquery-mcp, the endpoint is
+    ``https://bigquery.googleapis.com/mcp`` over streamable HTTP — there
+    is no unified ``mcp.googleapis.com`` entrypoint.
     """
     try:
         from google.adk.agents import Agent
-        from google.adk.tools.mcp_tool import MCPToolset, SseServerParams
+        from google.adk.tools.mcp_tool import McpToolset
+        from google.adk.tools.mcp_tool.mcp_session_manager import (
+            StreamableHTTPConnectionParams,
+        )
 
         # Google's managed BigQuery MCP server
-        bigquery_mcp = MCPToolset(
-            connection_params=SseServerParams(
-                url="https://mcp.googleapis.com/v1alpha/sse",
-                headers={"Content-Type": "application/json"},
+        bigquery_mcp = McpToolset(
+            connection_params=StreamableHTTPConnectionParams(
+                url="https://bigquery.googleapis.com/mcp",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
             ),
         )
 

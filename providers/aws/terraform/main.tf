@@ -323,14 +323,31 @@ resource "aws_iam_role_policy" "bedrock_agent_model" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "InvokeFoundationModel"
+        # Claude Sonnet 4/4.5 are cross-region inference-profile only. Granting
+        # bedrock:InvokeModel against a single foundation-model ARN is
+        # insufficient — Bedrock requires (a) the inference-profile ARN and
+        # (b) the underlying foundation-model ARNs across every region the
+        # profile routes to. We scope (b) to the agent's region only; for
+        # true cross-region routing, broaden the resource to `bedrock:*::`.
+        Sid    = "InvokeInferenceProfile"
         Effect = "Allow"
         Action = [
           "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream"
+          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:GetInferenceProfile"
         ]
         Resource = [
-          "arn:${local.partition}:bedrock:${local.region}::foundation-model/${var.bedrock_model_id}",
+          "arn:${local.partition}:bedrock:${local.region}:${local.account_id}:inference-profile/${var.bedrock_model_id}",
+          "arn:${local.partition}:bedrock:*::foundation-model/*",
+        ]
+      },
+      {
+        Sid    = "InvokeEmbeddingModel"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+        ]
+        Resource = [
           "arn:${local.partition}:bedrock:${local.region}::foundation-model/${var.bedrock_embedding_model_id}"
         ]
       },
@@ -1025,9 +1042,12 @@ resource "aws_budgets_budget" "monthly_cost" {
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.enable_github_oidc ? 1 : 0
 
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+  # AWS uses its own trusted root CAs for token.actions.githubusercontent.com;
+  # a configured thumbprint_list is retained but not used for verification
+  # (see terraform-provider-aws iam_openid_connect_provider docs), so we omit
+  # it to avoid drift noise.
 
   tags = merge(local.common_tags, { Purpose = "github-oidc" })
 }

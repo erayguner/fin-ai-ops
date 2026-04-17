@@ -185,9 +185,9 @@ Error: creating Bedrock Agent: ValidationException
 ```
 
 **Possible causes**:
-1. Model ID incorrect — verify `bedrock_model_id` matches an available model
+1. Model ID incorrect — Claude Sonnet 4 / 4.5 require a cross-region inference-profile identifier (e.g. `eu.anthropic.claude-sonnet-4-5-20250929-v1:0`), not a bare foundation-model ID. See [Supported foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
 2. Model access not granted — see [Bedrock model access](#aws-bedrock-model-access-not-enabled)
-3. Region doesn't support Bedrock — use `us-east-1`, `us-west-2`, or `eu-west-1`
+3. Region not covered by the chosen inference profile — check the profile's Region list against your deployment region.
 
 ### GCP: "Billing account not found"
 
