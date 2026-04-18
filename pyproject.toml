@@ -27,7 +27,7 @@ gcp = [
 
 # AWS native agent stack (Bedrock + boto3)
 aws = [
-    "boto3>=1.35.0",
+    "boto3>=1.42.88",
 ]
 
 all-providers = [
