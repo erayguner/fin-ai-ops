@@ -117,7 +117,10 @@ class BedrockTraceAdapter:
         observation = orch.get("observation") or {}
         if invocation_input or observation:
             tool_name, arguments = _extract_tool_call(invocation_input)
-            succeeded = "actionGroupInvocationOutput" in observation or "knowledgeBaseLookupOutput" in observation
+            succeeded = (
+                "actionGroupInvocationOutput" in observation
+                or "knowledgeBaseLookupOutput" in observation
+            )
             error = ""
             if "finalResponse" not in observation and not succeeded:
                 error = (observation.get("failureTrace") or {}).get("failureReason", "")

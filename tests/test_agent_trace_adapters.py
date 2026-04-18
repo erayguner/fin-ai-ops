@@ -73,9 +73,7 @@ class TestBedrockAdapter:
                     "guardrailTrace": {
                         "action": "GUARDRAIL_INTERVENED",
                         "guardrailVersion": "DRAFT",
-                        "inputAssessments": [
-                            {"contentPolicy": [{"type": "PROMPT_ATTACK"}]}
-                        ],
+                        "inputAssessments": [{"contentPolicy": [{"type": "PROMPT_ATTACK"}]}],
                     }
                 }
             }

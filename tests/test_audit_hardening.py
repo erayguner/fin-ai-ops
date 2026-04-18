@@ -144,9 +144,7 @@ class TestSignedExport:
         import hashlib
         import hmac
 
-        encoded = json.dumps(
-            doc1["payload"], sort_keys=True, separators=(",", ":")
-        ).encode()
+        encoded = json.dumps(doc1["payload"], sort_keys=True, separators=(",", ":")).encode()
         expected = hmac.new(b"y" * 32, encoded, hashlib.sha256).hexdigest()
         assert doc1["signature"] == expected
 

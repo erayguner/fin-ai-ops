@@ -286,9 +286,7 @@ def get_budget_status(
                 "threshold_rules": [
                     {
                         "threshold_percent": rule.threshold_percent,
-                        "spend_basis": rule.spend_basis.name
-                        if rule.spend_basis
-                        else "UNSPECIFIED",
+                        "spend_basis": rule.spend_basis.name if rule.spend_basis else "UNSPECIFIED",
                     }
                     for rule in budget.threshold_rules
                 ],

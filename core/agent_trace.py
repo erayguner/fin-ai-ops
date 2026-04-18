@@ -217,7 +217,9 @@ class DecisionRecord(BaseModel):
     correlation_id: str = ""
     triggering_step_id: str = ""
     decision: DecisionVerdict
-    gate_name: str = Field(description="Which gate made the decision (e.g. 'governor', 'pii_filter').")
+    gate_name: str = Field(
+        description="Which gate made the decision (e.g. 'governor', 'pii_filter')."
+    )
     reason: str = ""
     policy_id: str = ""
     actor: str = "system"
@@ -305,10 +307,7 @@ def _step_oneliner(step: _StepBase) -> str:
         status = "ok" if step.succeeded else f"err:{step.error[:60]}"
         return f"tool={step.tool_name} ({status}) {step.duration_ms:.0f}ms"
     if isinstance(step, GuardrailEvaluationStep):
-        return (
-            f"guardrail={step.guardrail_name} triggered={step.triggered} "
-            f"action={step.action}"
-        )
+        return f"guardrail={step.guardrail_name} triggered={step.triggered} action={step.action}"
     if isinstance(step, ApprovalRequestStep):
         state = "approved" if step.approved else "pending" if step.approved is None else "denied"
         return f"approval={step.request_id} {state} by={step.responded_by or '-'}"
