@@ -40,7 +40,12 @@ class TestGCPAnalyseFunctions:
         """Should return unavailable when google-cloud-bigquery is not installed."""
         from providers.gcp.agents.finops_agent import analyse_billing_costs
 
-        result = analyse_billing_costs("test-project")
+        result = analyse_billing_costs(
+            bq_project="host-project",
+            bq_dataset="billing_export",
+            billing_account_id="000000-111111-222222",
+            project_id="test-project",
+        )
         assert result["status"] in ("success", "unavailable", "error")
 
     def test_detect_costly_resources_without_asset(self):
@@ -61,7 +66,7 @@ class TestGCPAnalyseFunctions:
         """Should return unavailable when billing library is not installed."""
         from providers.gcp.agents.finops_agent import get_budget_status
 
-        result = get_budget_status("test-project")
+        result = get_budget_status("000000-111111-222222")
         assert result["status"] in ("success", "unavailable", "error")
 
     def test_recommend_optimisations_without_recommender(self):

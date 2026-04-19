@@ -185,9 +185,9 @@ Error: creating Bedrock Agent: ValidationException
 ```
 
 **Possible causes**:
-1. Model ID incorrect — verify `bedrock_model_id` matches an available model
+1. Model ID incorrect — Claude Sonnet 4 / 4.5 require a cross-region inference-profile identifier (e.g. `eu.anthropic.claude-sonnet-4-5-20250929-v1:0`), not a bare foundation-model ID. See [Supported foundation models](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
 2. Model access not granted — see [Bedrock model access](#aws-bedrock-model-access-not-enabled)
-3. Region doesn't support Bedrock — use `us-east-1`, `us-west-2`, or `eu-west-1`
+3. Region not covered by the chosen inference profile — check the profile's Region list against your deployment region.
 
 ### GCP: "Billing account not found"
 
@@ -542,7 +542,7 @@ The `CompositeDispatcher` sends to all configured channels. One channel failing 
 
 ### Tests are slow
 
-**Fix**: The 522-test suite should complete in around 10-12 seconds. If significantly slower:
+**Fix**: The 539-test suite should complete in around 10-12 seconds. If significantly slower:
 - Ensure no cloud API calls are being made (tests should work offline)
 - Clear `__pycache__`: `find . -name '__pycache__' -exec rm -rf {} +`
 - Run with `-x` to stop on first failure: `pytest -x`

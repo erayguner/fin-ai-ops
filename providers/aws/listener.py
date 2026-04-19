@@ -24,7 +24,16 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["CREATION_EVENTS", "AWSEventListener"]
 
-# CloudTrail event names that indicate resource creation
+# CloudTrail event names that indicate resource creation.
+#
+# NOTE: CloudTrail's `eventName` alone is not unique across services — for
+# example, EKS, Redshift, ElastiCache, MemoryDB, and EMR all emit
+# ``CreateCluster``. Disambiguation requires inspecting ``eventSource``
+# (e.g. ``eks.amazonaws.com`` vs ``redshift.amazonaws.com``), which this
+# dict-based listener does not do. To avoid mis-classification we map
+# ``CreateCluster`` to a single owner (EKS) and exclude the others rather
+# than silently tagging Redshift clusters as EKS. A future refactor can
+# add ``eventSource``-aware routing to reclaim the other services.
 CREATION_EVENTS: dict[str, str] = {
     "RunInstances": "ec2:instance",
     "CreateDBInstance": "rds:db",
@@ -34,7 +43,6 @@ CREATION_EVENTS: dict[str, str] = {
     "CreateFunction20150331": "lambda:function",
     "CreateCacheCluster": "elasticache:cluster",
     "CreateReplicationGroup": "elasticache:replication-group",
-    "CreateRedshiftCluster": "redshift:cluster",
     "CreateNatGateway": "nat_gateway",
     "CreateLoadBalancer": "elb:load-balancer",
     "CreateVolume": "ebs:volume",
