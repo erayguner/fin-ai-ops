@@ -65,6 +65,7 @@ disallow_untyped_defs = false
 module = [
     "boto3.*",
     "botocore.*",
+    "cryptography.*",
     "google.*",
     "pydantic.*",
     "yaml",
