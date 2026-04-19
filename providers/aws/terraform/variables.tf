@@ -34,9 +34,17 @@ variable "monthly_budget_usd" {
 }
 
 variable "bedrock_model_id" {
-  description = "Foundation model ID for the Bedrock FinOps agent."
+  description = <<-EOT
+    Bedrock Agent foundation model. Claude Sonnet 4 / 4.5 are only served via
+    cross-region inference profiles (see
+    docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html), so
+    this must be an inference-profile identifier — e.g.
+    `eu.anthropic.claude-sonnet-4-5-20250929-v1:0` or
+    `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. Match the prefix to your
+    deployment region's geography.
+  EOT
   type        = string
-  default     = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+  default     = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 variable "bedrock_embedding_model_id" {

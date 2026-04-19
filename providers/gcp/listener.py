@@ -11,7 +11,7 @@ Credentials. No service account keys permitted (aligned with SPEC.md).
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from core.models import CloudProvider, ResourceCreationEvent
@@ -123,14 +123,25 @@ class GCPEventListener(BaseCloudProvider):
     def _query_audit_logs(
         self, client: Any, project_id: str, lookback_minutes: int
     ) -> list[dict[str, Any]]:
-        """Query Cloud Audit Logs for resource creation events."""
+        """Query Cloud Audit Logs for resource creation events.
+
+        Filters on admin-activity logs and the configured creation method
+        names. ``resource.type`` is service-specific (``gce_instance`` for
+        Compute, ``gce_disk`` for disks, etc.), so we constrain by method
+        name + log stream rather than resource type.
+        Timestamps must be RFC 3339 — Cloud Logging does not support the
+        ``"15m ago"`` relative-time shorthand.
+        """
         method_filter = " OR ".join(
             f'protoPayload.methodName="{method}"' for method in CREATION_METHODS
         )
+        since = (datetime.now(UTC) - timedelta(minutes=lookback_minutes)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         log_filter = (
-            f'resource.type="audited_resource" AND '
+            'logName:"cloudaudit.googleapis.com%2Factivity" AND '
             f"({method_filter}) AND "
-            f'timestamp>="{lookback_minutes}m ago"'
+            f'timestamp>="{since}"'
         )
 
         entries: list[dict[str, Any]] = []

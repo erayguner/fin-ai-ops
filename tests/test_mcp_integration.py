@@ -23,10 +23,13 @@ from providers.gcp.mcp_integration.google_mcp_config import (
 class TestGoogleMCPConfig:
     def test_google_mcp_servers_available(self):
         servers = get_google_mcp_servers()
-        assert len(servers) >= 2
+        # Only BigQuery MCP is officially published at the time of writing
+        # (see docs.cloud.google.com/bigquery/docs/use-bigquery-mcp).
+        assert len(servers) >= 1
         names = {s["name"] for s in servers}
         assert "google-bigquery-mcp" in names
-        assert "google-resource-manager-mcp" in names
+        for server in servers:
+            assert server["endpoint"].endswith(".googleapis.com/mcp")
 
     def test_google_mcp_uses_oauth_not_api_keys(self):
         servers = get_google_mcp_servers()
@@ -40,8 +43,7 @@ class TestGoogleMCPConfig:
     def test_adk_toolset_config(self):
         config = get_adk_mcp_toolset_config()
         assert "bigquery" in config
-        assert "resource_manager" in config
-        assert "url" in config["bigquery"]
+        assert config["bigquery"]["url"] == "https://bigquery.googleapis.com/mcp"
 
     def test_gcp_claude_code_config(self):
         config = get_gcp_claude_config("my-project")

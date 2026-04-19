@@ -24,7 +24,7 @@ ruff format --check .
 # Type check
 mypy core providers agents mcp_server
 
-# Tests (522 tests, ~11s)
+# Tests (539 tests, ~11s)
 pytest
 
 # Terraform validation

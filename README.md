@@ -34,7 +34,8 @@ fin-ai-ops/
 │   ├── alerts.py                   # Contextualised alert generation
 │   ├── audit.py                    # Immutable audit trail (SHA-256 chain)
 │   ├── policies.py                 # Cost governance policy engine
-│   └── tagging.py                  # Tagging governance domain (policies, taggability, audits)
+│   ├── tagging.py                  # Tagging governance domain (policies, taggability, audits)
+│   └── tool_governor.py            # MCP tool-call governor (policy + budget + approval + audit)
 ├── providers/
 │   ├── base.py                     # Provider interface (ABC)
 │   ├── aws/
@@ -67,7 +68,7 @@ fin-ai-ops/
 │   ├── drift_check.py              # Terraform-to-policy alignment
 │   └── repo_health.py              # Full repo health check
 ├── docs/                           # Getting started & troubleshooting guides
-├── tests/                          # 522 tests
+├── tests/                          # 539 tests
 ├── SECURITY.md                     # Security policy & vulnerability reporting
 └── audit_store/                    # Append-only audit logs (JSONL, runtime)
 ```
@@ -114,9 +115,8 @@ The GCP Terraform module deploys a 2026 ADK-native runtime:
 
 Auth via WIF — **zero service account keys**.
 
-**Google MCP Servers** ([google/mcp](https://github.com/google/mcp)):
-- BigQuery MCP — Billing data queries and AI forecasting
-- Cloud Resource Manager MCP — Project and resource hierarchy
+**Google MCP Servers** ([docs.cloud.google.com/mcp/overview](https://docs.cloud.google.com/mcp/overview)):
+- BigQuery MCP (`https://bigquery.googleapis.com/mcp`) — Billing data queries via streamable HTTP, OAuth 2.0 via ADC/WIF
 
 ## Zero API Keys Architecture
 
@@ -177,7 +177,7 @@ pip install -e ".[gcp]"     # GCP + Google ADK
 pip install -e ".[aws]"     # AWS + boto3
 pip install -e ".[dev]"     # Development tools
 
-# Run tests (522 tests, ~11s)
+# Run tests (539 tests, ~11s)
 pytest
 
 # Run pre-flight checks
@@ -300,6 +300,19 @@ The `TaggingHealthAgent` (`agents/tagging_health_agent.py`) runs weekly complian
 - Classifies resources as `compliant`, `non_compliant`, `non_taggable`, or `exempt`.
 - Distinguishes provider-native non-taggable types (e.g. `route53:hostedzone-record`, `iam.serviceaccounts`) using the built-in taggability registry (~100 AWS + ~70 GCP resource types covered).
 - Generates a weekly `TaggingHealthReport` with compliance trend, unattributed monthly spend, remediation priorities ranked by cost, and actionable recommendations.
+
+## Tool-Call Governance
+
+`core/tool_governor.py` is a separate domain that governs an LLM agent's MCP tool usage (distinct from the cloud-resource governor). It implements the structured-sandboxing pattern:
+
+- **`ToolRequest` / `ToolResult`** — LangGraph-style structured requests; the agent never calls MCP directly.
+- **`governed_call()`** — the single enforcement point. Every policy, budget, argument-gate and approval decision flows through here.
+- **`ToolCategory`** — explicit classification (`discovery` / `connection` / `execution` / `other`) so separation-of-duties rules are declarative, not substring-matched.
+- **`GovernancePolicy`** — allow/deny lists, category allow-lists, approval-required tools, fail-closed default.
+- **`BudgetTracker`** — total-call / per-tool / runtime / parallelism caps plus optional connection↔execution separation.
+- **Structured artifacts** — `policy_decision`, `tool_call_log`, `approval_request`, `approval_log`, `budget_stats`, `result_summary`; rendered by `AuditReportGenerator` into a machine-readable report with denial breakdowns and recommendations.
+
+The MCP server wires every `handle_tool_call()` through `governed_call()`. Disabled by default (`default_allow=True`); enable with `hub.governor.enabled=true` to fail-closed.
 
 ## Documentation
 

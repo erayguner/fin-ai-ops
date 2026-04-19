@@ -31,6 +31,7 @@ from agents.report_agent import ReportAgent
 from core.audit import AuditLogger
 from core.config import HubConfig
 from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
+from core.filters import redact_arguments as _filters_redact_arguments
 from core.models import (
     ActionStatus,
     CloudProvider,
@@ -49,6 +50,17 @@ from core.notifications import (
 from core.policies import PolicyEngine
 from core.pricing import LocalPricingService
 from core.thresholds import ThresholdEngine
+from core.tool_governor import (
+    Artifact,
+    BudgetLimits,
+    BudgetTracker,
+    GovernancePolicy,
+    ToolCall,
+    ToolCategory,
+    ToolRegistry,
+    ToolRequest,
+    governed_call,
+)
 from core.validation import (
     ValidationError,
     safe_error_message,
@@ -143,6 +155,42 @@ def _load_state() -> None:
 
 
 _load_state()
+
+
+# ---------------------------------------------------------------------------
+# Optional tool governor — structured sandboxing around MCP tool calls.
+#
+# Disabled by default (default_allow=True, no budget limits) so existing
+# behaviour is unchanged. Enable by setting hub.governor.enabled=true and
+# declaring an allow-list / budget in config.
+# ---------------------------------------------------------------------------
+
+_GOVERNOR_ENABLED = hub_config.get_str("hub.governor.enabled", "false").lower() == "true"
+
+_GOVERNOR_REGISTRY: ToolRegistry | None = None
+_GOVERNOR_POLICY: GovernancePolicy | None = None
+_GOVERNOR_BUDGET: BudgetTracker | None = None
+_GOVERNOR_ARTIFACTS: list[Artifact] = []
+
+
+def _init_governor() -> None:
+    """Populate the governor registry after MCP_TOOLS is defined."""
+    global _GOVERNOR_REGISTRY, _GOVERNOR_POLICY, _GOVERNOR_BUDGET
+    _GOVERNOR_REGISTRY = ToolRegistry(
+        ToolCall(name=name, category=ToolCategory.EXECUTION) for name in MCP_TOOLS
+    )
+    _GOVERNOR_POLICY = GovernancePolicy(
+        name=hub_config.get_str("hub.governor.policy_name", "finops-default"),
+        default_allow=not _GOVERNOR_ENABLED,
+        allowed_categories={ToolCategory.EXECUTION} if _GOVERNOR_ENABLED else set(),
+    )
+    _GOVERNOR_BUDGET = BudgetTracker(
+        BudgetLimits(
+            max_total_calls=hub_config.get_int("hub.governor.max_total_calls", 0),
+            max_calls_per_tool=hub_config.get_int("hub.governor.max_calls_per_tool", 0),
+            max_runtime_seconds=float(hub_config.get_int("hub.governor.max_runtime_seconds", 0)),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -761,50 +809,80 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any
 
     All exceptions are caught and returned as safe error messages that
     don't leak internal file paths, class names, or stack traces.
+
+    When ``hub.governor.enabled`` is true, every call routes through
+    :func:`core.tool_governor.governed_call` which enforces policy,
+    budget, and argument gates before execution. Decisions are captured
+    as structured artifacts for audit reporting.
     """
     tool = MCP_TOOLS.get(tool_name)
     if tool is None:
         return {"status": "error", "message": f"Unknown tool: {tool_name}"}
 
-    try:
-        result = tool["function"](**arguments)
+    if _GOVERNOR_REGISTRY is None:
+        _init_governor()
+    assert _GOVERNOR_REGISTRY is not None
+    assert _GOVERNOR_POLICY is not None
+    assert _GOVERNOR_BUDGET is not None
+
+    request = ToolRequest(tool_name=tool_name, arguments=arguments, requester="mcp_client")
+    gov_result = governed_call(
+        request,
+        policy=_GOVERNOR_POLICY,
+        registry=_GOVERNOR_REGISTRY,
+        budget=_GOVERNOR_BUDGET,
+        artifacts=_GOVERNOR_ARTIFACTS,
+        executor=lambda req: tool["function"](**req.arguments),
+    )
+    if not gov_result.allowed:
         audit_logger.log(
             action=f"mcp.tool_call.{tool_name}",
             actor="mcp_client",
             target=tool_name,
             details={
                 "arguments": _redact_arguments(arguments),
-                "result_status": result.get("status", "ok"),
+                "denial_reason": gov_result.denial_reason,
             },
+            outcome="denied",
         )
-        return result
-    except ValidationError as e:
-        # Validation errors are safe to return verbatim
-        return {"status": "error", "message": str(e)}
-    except Exception as e:
+        return {"status": "denied", "message": gov_result.denial_reason}
+    if gov_result.error:
+        # Preserve existing contract: ValidationError messages are safe
+        # to return verbatim; anything else is routed through safe_error_message.
+        if gov_result.error_type == "ValidationError":
+            return {"status": "error", "message": gov_result.error}
+        safe_msg = safe_error_message(Exception(gov_result.error))
         audit_logger.log(
             action=f"mcp.tool_call.{tool_name}",
             actor="mcp_client",
             target=tool_name,
-            details={"arguments": _redact_arguments(arguments), "error": safe_error_message(e)},
+            details={"arguments": _redact_arguments(arguments), "error": safe_msg},
             outcome="failure",
         )
-        return {"status": "error", "message": safe_error_message(e)}
+        return {"status": "error", "message": safe_msg}
+
+    result = gov_result.output
+    audit_logger.log(
+        action=f"mcp.tool_call.{tool_name}",
+        actor="mcp_client",
+        target=tool_name,
+        details={
+            "arguments": _redact_arguments(arguments),
+            "result_status": result.get("status", "ok") if isinstance(result, dict) else "ok",
+        },
+    )
+    return result  # type: ignore[no-any-return]
 
 
 def _redact_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Redact potentially sensitive fields from audit log arguments."""
-    redacted = dict(arguments)
-    sensitive_keys = {"creator_email", "creator_identity", "acknowledged_by", "resolved_by"}
-    for key in sensitive_keys:
-        if redacted.get(key):
-            value = str(redacted[key])
-            if "@" in value:
-                # Redact email to first char + ***@domain
-                parts = value.split("@")
-                redacted[key] = f"{parts[0][0]}***@{parts[1]}"
-            elif len(value) > 10:
-                redacted[key] = f"{value[:8]}..."
+    """Redact potentially sensitive fields from audit log arguments.
+
+    Routes through :func:`core.filters.redact_arguments` so the same
+    PII / credential scanners protect every audit write, notification,
+    and transcript (ADR-008 §6). The old hardcoded 4-key redactor was
+    a subset of what ``PIIRedactor`` already covers.
+    """
+    redacted, _categories = _filters_redact_arguments(arguments)
     return redacted
 
 

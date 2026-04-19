@@ -16,18 +16,18 @@ dependencies = [
 [project.optional-dependencies]
 # GCP native agent stack (Google ADK + Cloud APIs)
 gcp = [
-    "google-adk>=1.0.0",
-    "google-cloud-logging>=3.10.0",
-    "google-cloud-billing-budgets>=1.14.0",
-    "google-cloud-bigquery>=3.20.0",
-    "google-cloud-resource-manager>=1.12.0",
-    "google-cloud-asset>=3.26.0",
-    "google-cloud-recommender>=2.16.0",
+    "google-adk>=1.29.0",
+    "google-cloud-logging>=3.15.0",
+    "google-cloud-billing-budgets>=1.20.0",
+    "google-cloud-bigquery>=3.41.0",
+    "google-cloud-resource-manager>=1.17.0",
+    "google-cloud-asset>=4.3.0",
+    "google-cloud-recommender>=2.21.0",
 ]
 
 # AWS native agent stack (Bedrock + boto3)
 aws = [
-    "boto3>=1.35.0",
+    "boto3>=1.42.88",
 ]
 
 all-providers = [
@@ -35,10 +35,10 @@ all-providers = [
 ]
 
 dev = [
-    "pytest>=8.3.0,<10",
-    "pytest-cov>=6.0.0,<8",
-    "ruff>=0.14.0,<1",
-    "mypy>=1.14.1,<2",
+    "pytest>=9.0.3,<10",
+    "pytest-cov>=7.1.0,<8",
+    "ruff>=0.15.10,<1",
+    "mypy>=1.20.1,<2",
     "pre-commit>=4.5.1,<5",
 ]
 
@@ -65,6 +65,7 @@ disallow_untyped_defs = false
 module = [
     "boto3.*",
     "botocore.*",
+    "cryptography.*",
     "google.*",
     "pydantic.*",
     "yaml",
