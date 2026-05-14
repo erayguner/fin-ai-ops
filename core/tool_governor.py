@@ -109,6 +109,18 @@ class ToolRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     requester: str = "agent"
     reason: str = ""
+    session_id: str = Field(
+        default="",
+        description="Agent session this request belongs to. When set, the "
+        "governor consults :class:`~core.agent_supervisor.AgentSupervisor` "
+        "and short-circuits on halt.",
+    )
+    principal_id: str = Field(
+        default="",
+        description="Principal (user / service / agent identity) the call "
+        "should be billed against. Drives per-principal budget isolation "
+        "(framework §4.4).",
+    )
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -358,12 +370,19 @@ def governed_call(
     artifacts: list[Artifact] | None = None,
     argument_gates: dict[str, ArgumentGate] | None = None,
     approval_handler: ApprovalHandler | None = None,
+    supervisor: Any | None = None,
 ) -> ToolResult:
     """Single enforcement point for all MCP access.
 
     All decisions — allow, deny, approval — are logged as structured
     artifacts against the shared ``artifacts`` list. The model never
     reaches ``executor`` unless the decision is ALLOW.
+
+    If ``supervisor`` is provided (typically an
+    :class:`~core.agent_supervisor.AgentSupervisor`) and ``request.session_id``
+    is non-empty, the governor calls ``supervisor.is_halted(session_id)``
+    before policy evaluation and short-circuits to ``Decision.DENY`` on a
+    halt entry. This closes framework §14.1.
 
     Raises nothing on deny; returns a ``ToolResult`` with ``allowed=False``.
     """
@@ -383,6 +402,35 @@ def governed_call(
         )
 
     category = registry.category_of(request.tool_name)
+
+    # 0. Kill-switch: if the session is halted, deny everything before policy.
+    if supervisor is not None and request.session_id:
+        halt_entry = supervisor.is_halted(request.session_id)
+        if halt_entry is not None:
+            reason = (
+                f"session halted by {halt_entry.operator}"
+                f"{': ' + halt_entry.reason if halt_entry.reason else ''}"
+            )
+            _log(
+                ArtifactType.POLICY_DECISION,
+                {
+                    "decision": Decision.DENY.value,
+                    "reason": reason,
+                    "category": category.value,
+                    "policy": policy.name,
+                    "halt_id": halt_entry.halt_id,
+                    "session_id": request.session_id,
+                },
+            )
+            result = ToolResult(
+                request_id=request.request_id,
+                tool_name=request.tool_name,
+                decision=Decision.DENY,
+                allowed=False,
+                denial_reason=reason,
+            )
+            _log(ArtifactType.RESULT_SUMMARY, {"status": "halted", "reason": reason})
+            return result
 
     # 1. Policy check
     decision, reason = _policy_allows(policy, request.tool_name, category)

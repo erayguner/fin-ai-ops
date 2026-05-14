@@ -55,6 +55,8 @@ class BedrockTraceAdapter:
             provider=CloudProvider.AWS,
             correlation_id=correlation_id or session_id,
         )
+        # Populated per chunk from callerChain — propagated onto child steps.
+        self._current_parent_step_id: str = ""
 
     @property
     def trace(self) -> AgentTrace:
@@ -67,7 +69,30 @@ class BedrockTraceAdapter:
         if session_id and session_id != self._trace.session_id:
             # Bedrock should never switch session mid-stream, but if it
             # does we want the mismatch in the raw payload for forensics.
-            pass
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "BedrockTraceAdapter: session_id mismatch (expected=%s, observed=%s) — "
+                "still appending to current trace; raw payload preserved.",
+                self._trace.session_id,
+                session_id,
+            )
+
+        # ADR-008 §3.3 / F-9: derive parent_step_id from Bedrock callerChain
+        # to preserve multi-agent provenance. Each entry has an agentAliasArn
+        # whose chain implies the upstream agent that delegated this hop.
+        caller_chain = trace_part.get("callerChain") or []
+        parent_id = ""
+        if isinstance(caller_chain, list) and caller_chain:
+            # The last entry is the immediate caller; earlier entries are the
+            # upstream lineage. Hash the alias to derive a deterministic
+            # parent_step_id so subsequent hops resolve to the same ID.
+            import hashlib
+
+            last_alias = (caller_chain[-1] or {}).get("agentAliasArn", "") or ""
+            if last_alias:
+                parent_id = hashlib.sha256(last_alias.encode()).hexdigest()[:32]
+        self._current_parent_step_id = parent_id
 
         if "orchestrationTrace" in trace:
             self._consume_orchestration(trace["orchestrationTrace"], trace_part)
@@ -77,6 +102,13 @@ class BedrockTraceAdapter:
             self._consume_model("postprocessing", trace["postProcessingTrace"], trace_part)
         if "routingClassifierTrace" in trace:
             self._consume_model("routing", trace["routingClassifierTrace"], trace_part)
+        if "customOrchestrationTrace" in trace:
+            # ADR-008 §2 / F-9 fix: customOrchestrationTrace was previously
+            # silently dropped. Treat it as a generic model invocation so the
+            # raw payload is retained for forensic review.
+            self._consume_model(
+                "custom_orchestration", trace["customOrchestrationTrace"], trace_part
+            )
         if "guardrailTrace" in trace:
             self._consume_guardrail(trace["guardrailTrace"], trace_part)
         if "failureTrace" in trace:
@@ -95,6 +127,7 @@ class BedrockTraceAdapter:
             step = ModelInvocationStep(
                 session_id=self._trace.session_id,
                 correlation_id=self._trace.correlation_id,
+                parent_step_id=self._current_parent_step_id,
                 rationale=_truncate(
                     (model_output.get("rawResponse") or {}).get("content", ""),
                     _PROMPT_PREVIEW_CHARS,
@@ -153,6 +186,7 @@ class BedrockTraceAdapter:
             ModelInvocationStep(
                 session_id=self._trace.session_id,
                 correlation_id=self._trace.correlation_id,
+                parent_step_id=self._current_parent_step_id,
                 rationale=f"phase={phase}",
                 raw={"phase": phase, "input": model_input, "output": model_output},
                 model_id=model_input.get("foundationModel", ""),
@@ -193,6 +227,7 @@ class BedrockTraceAdapter:
             GuardrailEvaluationStep(
                 session_id=self._trace.session_id,
                 correlation_id=self._trace.correlation_id,
+                parent_step_id=self._current_parent_step_id,
                 raw=guardrail,
                 guardrail_name="bedrock-guardrail",
                 guardrail_version=str(guardrail.get("guardrailVersion", "")),
@@ -209,6 +244,7 @@ class BedrockTraceAdapter:
             FailureStep(
                 session_id=self._trace.session_id,
                 correlation_id=self._trace.correlation_id,
+                parent_step_id=self._current_parent_step_id,
                 raw=failure,
                 error_type=failure.get("failureCode", "BedrockFailure"),
                 error_message=failure.get("failureReason", ""),

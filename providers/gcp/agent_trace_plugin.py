@@ -54,6 +54,17 @@ class ADKTracePlugin:
     name = "finops-trace-plugin"
 
     def __init__(self, trace: AgentTrace) -> None:
+        # When rebased as a BasePlugin subclass, the SDK's __init__
+        # requires a positional ``name`` argument. We call up the chain
+        # defensively so the same constructor signature works whether
+        # we're a plain class or a BasePlugin subclass.
+        import contextlib
+
+        try:
+            super().__init__(name=self.name)  # type: ignore[call-arg]
+        except TypeError:
+            with contextlib.suppress(TypeError):
+                super().__init__()
         self._trace = trace
 
     @property
@@ -214,7 +225,36 @@ def create_trace_plugin(
         provider=CloudProvider.GCP,
         correlation_id=correlation_id or session_id,
     )
-    return ADKTracePlugin(trace)
+    plugin_cls = _resolve_plugin_class()
+    return plugin_cls(trace)
+
+
+def _resolve_plugin_class() -> type[ADKTracePlugin]:
+    """Return :class:`ADKTracePlugin` rebased on :class:`BasePlugin` when ADK is present.
+
+    Framework §9.1 / P1-C — the ADK ``Runner`` filters plugins by
+    isinstance check against ``BasePlugin``, so a plain class would
+    not be registered. We rebuild the class at first use so the test
+    suite (no ADK installed) still imports cleanly, and production
+    callers get a real ``BasePlugin`` subclass.
+    """
+    try:
+        from google.adk.plugins import BasePlugin
+    except ImportError:
+        return ADKTracePlugin
+    # Cache the rebased class on the module so we only build it once.
+    cached = globals().get("_ADKTracePluginRebased")
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
+    # ADKTracePlugin goes first in the MRO so its __init__ runs and
+    # forwards ``name`` to BasePlugin via super().__init__(name=...).
+    rebased = type(
+        "ADKTracePlugin",
+        (ADKTracePlugin, BasePlugin),
+        {"__module__": __name__},
+    )
+    globals()["_ADKTracePluginRebased"] = rebased
+    return rebased  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------

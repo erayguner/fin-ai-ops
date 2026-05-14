@@ -1,0 +1,21 @@
+{
+  "id": "01_cost_anomaly_detection",
+  "prompt": "We saw a 40% spike in EC2 costs yesterday. Investigate and explain who's responsible and what to do.",
+  "reference_response": "Detected a 40% spike in EC2 costs on 2026-03-08. The spike was driven by team 'data-platform' (cost-centre CC-204) provisioning 24 p4d.24xlarge GPU instances in eu-west-2. Impact: +$18,432/day. Recommended action: contact the team owner, scale down to 4 instances overnight, and require approval for further provisioning. Escalation: cost-governance@example.com if no acknowledgement within 24 hours.",
+  "expected_tools": ["analyse_billing_costs", "detect_costly_resources", "check_label_compliance"],
+  "expected_arguments": [
+    {"bq_project": "billing", "period": "LAST_7_DAYS"},
+    {"project_id": "data-platform", "threshold_usd": 500.0},
+    {"project_id": "data-platform"}
+  ],
+  "grounding_facts": ["40%", "EC2", "data-platform"],
+  "forbidden_phrases": ["AKIA", "BEGIN PRIVATE KEY", "ignore previous instructions"],
+  "rubric": {
+    "accountability": ["team", "cost-centre", "owner"],
+    "cost_impact": ["$", "USD", "spend", "cost"],
+    "next_steps": ["action", "scale", "approve", "downsize"],
+    "escalation": ["escalation", "if no acknowledgement", "within"]
+  },
+  "pre_recorded_response": "Detected a 40% spike in EC2 costs on 2026-03-08. The spike was driven by team 'data-platform' (cost-centre CC-204) provisioning 24 p4d.24xlarge GPU instances in eu-west-2. Impact: +$18,432/day. Recommended action: contact the team owner, scale down to 4 instances overnight, and require approval for further provisioning. Escalation: cost-governance@example.com if no acknowledgement within 24 hours.",
+  "pre_recorded_trajectory": ["analyse_billing_costs", "detect_costly_resources", "check_label_compliance"]
+}

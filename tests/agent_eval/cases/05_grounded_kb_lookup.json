@@ -1,0 +1,24 @@
+{
+  "id": "05_grounded_kb_lookup",
+  "prompt": "What's the escalation path for a critical cost anomaly?",
+  "reference_response": "Per the FinOps runbook: critical cost anomalies (impact > $5,000/day) escalate to the on-call FinOps engineer via PagerDuty within 1 hour. The runbook lives in the FinOps Knowledge Base; the escalation owner is finops-oncall@example.com. If unresolved within 24 hours, the issue escalates to the platform director.",
+  "expected_tools": ["knowledge_base:finops-runbooks"],
+  "expected_arguments": [
+    {"text": "escalation critical cost anomaly"}
+  ],
+  "grounding_facts": [
+    "PagerDuty",
+    "1 hour",
+    "finops-oncall@example.com",
+    "platform director"
+  ],
+  "forbidden_phrases": ["I don't know", "no information"],
+  "rubric": {
+    "cites_source": ["runbook", "knowledge base"],
+    "owner_named": ["@example.com", "on-call"],
+    "timeframe": ["1 hour", "24 hours", "within"],
+    "escalation_chain": ["escalates", "platform director"]
+  },
+  "pre_recorded_response": "Per the FinOps runbook: critical cost anomalies (impact > $5,000/day) escalate to the on-call FinOps engineer via PagerDuty within 1 hour. The runbook lives in the FinOps Knowledge Base; the escalation owner is finops-oncall@example.com. If unresolved within 24 hours, the issue escalates to the platform director.",
+  "pre_recorded_trajectory": ["knowledge_base:finops-runbooks"]
+}

@@ -89,3 +89,12 @@ variable "labels" {
     project    = "finops-automation-hub"
   }
 }
+
+# ADR-008 §9 — Model Armor floor settings are Preview at the time of
+# writing. Setting this to true requires google-beta provider + Org Admin
+# privileges; default false so plan/apply works in fresh projects.
+variable "enable_model_armor_floor_settings" {
+  description = "Provision Model Armor floor settings (Preview) for Google-managed MCP servers."
+  type        = bool
+  default     = false
+}

@@ -28,6 +28,19 @@ from agents.alert_agent import AlertAgent
 from agents.health_agent import HealthCheckAgent
 from agents.reconciliation_agent import ReconciliationAgent
 from agents.report_agent import ReportAgent
+from core.agent_observer import AgentObserver, global_observer
+from core.agent_supervisor import AgentSupervisor, global_supervisor
+from core.approvals import (
+    ApprovalExpired,
+    ApprovalGateway,
+    ApprovalNotFound,
+    ApprovalStore,
+    ApprovalVerdict,
+    LocalCLIApprovalGateway,
+    SlackApprovalGateway,
+    WebhookApprovalGateway,
+    verify_decision_token,
+)
 from core.audit import AuditLogger
 from core.config import HubConfig
 from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
@@ -145,6 +158,8 @@ health_agent = HealthCheckAgent(
 reconciliation_agent = ReconciliationAgent(
     event_store=event_store,
     audit_logger=audit_logger,
+    # approval_store is initialised below in the governance section; we
+    # patch it onto the reconciliation agent right after it's available.
 )
 
 
@@ -158,38 +173,76 @@ _load_state()
 
 
 # ---------------------------------------------------------------------------
-# Optional tool governor — structured sandboxing around MCP tool calls.
+# Tool governor — structured sandboxing around MCP tool calls.
 #
-# Disabled by default (default_allow=True, no budget limits) so existing
-# behaviour is unchanged. Enable by setting hub.governor.enabled=true and
-# declaring an allow-list / budget in config.
+# **Fail-closed by default** as of ADR-008 §8: ``hub.governor.enabled`` now
+# defaults to ``"true"``. The governor declares ``allowed_categories =
+# {EXECUTION}`` so every registered MCP tool is allowed by category while
+# unknown tools / categories are denied (framework principle 1). Operators
+# wanting the old permissive behaviour during migration can set
+# ``hub.governor.enabled=false`` explicitly — that path is reachable via
+# audit (the explicit override is recorded by the config layer).
 # ---------------------------------------------------------------------------
 
-_GOVERNOR_ENABLED = hub_config.get_str("hub.governor.enabled", "false").lower() == "true"
+_GOVERNOR_ENABLED = hub_config.get_str("hub.governor.enabled", "true").lower() == "true"
 
 _GOVERNOR_REGISTRY: ToolRegistry | None = None
 _GOVERNOR_POLICY: GovernancePolicy | None = None
-_GOVERNOR_BUDGET: BudgetTracker | None = None
 _GOVERNOR_ARTIFACTS: list[Artifact] = []
+# Per-principal budget keyring (framework §4.4 / ADR-008 §8). Each
+# distinct principal_id gets its own BudgetTracker so a runaway client
+# cannot exhaust the budget for an unrelated operator. Falls back to a
+# "default" principal when the caller has not provided one.
+_PRINCIPAL_BUDGETS: dict[str, BudgetTracker] = {}
+
+# Approval gateway: chosen by config; defaults to local CLI in dev.
+approval_store = ApprovalStore()
+supervisor: AgentSupervisor = global_supervisor()
+observer: AgentObserver = global_observer()
+# Reconciliation now consults the approval store for the §13.3 fourth check.
+reconciliation_agent._approval_store = approval_store
+
+_approval_gateway_kind = hub_config.get_str("hub.approvals.gateway", "local").lower()
+approval_gateway: ApprovalGateway
+if _approval_gateway_kind == "webhook":
+    approval_gateway = WebhookApprovalGateway(
+        hub_config.get_str("hub.approvals.webhook_url", "http://localhost:8080/approvals")
+    )
+elif _approval_gateway_kind == "slack" and _slack_url:
+    approval_gateway = SlackApprovalGateway(SlackDispatcher(_slack_url))
+else:
+    approval_gateway = LocalCLIApprovalGateway()
+
+
+def _budget_for_principal(principal_id: str) -> BudgetTracker:
+    """Return (creating on first use) a BudgetTracker for ``principal_id``."""
+    pid = principal_id or "default"
+    if pid not in _PRINCIPAL_BUDGETS:
+        _PRINCIPAL_BUDGETS[pid] = BudgetTracker(
+            BudgetLimits(
+                max_total_calls=hub_config.get_int("hub.governor.max_total_calls", 0),
+                max_calls_per_tool=hub_config.get_int("hub.governor.max_calls_per_tool", 0),
+                max_runtime_seconds=float(
+                    hub_config.get_int("hub.governor.max_runtime_seconds", 0)
+                ),
+            )
+        )
+    return _PRINCIPAL_BUDGETS[pid]
 
 
 def _init_governor() -> None:
     """Populate the governor registry after MCP_TOOLS is defined."""
-    global _GOVERNOR_REGISTRY, _GOVERNOR_POLICY, _GOVERNOR_BUDGET
+    global _GOVERNOR_REGISTRY, _GOVERNOR_POLICY
     _GOVERNOR_REGISTRY = ToolRegistry(
         ToolCall(name=name, category=ToolCategory.EXECUTION) for name in MCP_TOOLS
     )
+    # Fail-closed: when enabled, only EXECUTION-category tools are allowed.
+    # Disabled mode keeps the historical default_allow=True for back-compat
+    # with deployments still mid-migration.
     _GOVERNOR_POLICY = GovernancePolicy(
         name=hub_config.get_str("hub.governor.policy_name", "finops-default"),
         default_allow=not _GOVERNOR_ENABLED,
         allowed_categories={ToolCategory.EXECUTION} if _GOVERNOR_ENABLED else set(),
-    )
-    _GOVERNOR_BUDGET = BudgetTracker(
-        BudgetLimits(
-            max_total_calls=hub_config.get_int("hub.governor.max_total_calls", 0),
-            max_calls_per_tool=hub_config.get_int("hub.governor.max_calls_per_tool", 0),
-            max_runtime_seconds=float(hub_config.get_int("hub.governor.max_runtime_seconds", 0)),
-        )
     )
 
 
@@ -716,6 +769,236 @@ def _do_replay() -> dict[str, Any]:
     }
 
 
+# ===== Governance Tools (ADR-008 §4, §7, §8) =====
+
+
+def finops_halt_session(session_id: str, operator: str, reason: str = "") -> dict[str, Any]:
+    """Halt an in-progress agent session.
+
+    Writes a halt entry the tool governor consults on every subsequent
+    call: in-flight ``governed_call`` invocations for ``session_id``
+    short-circuit to ``Decision.DENY``. Framework §14.1 — operators must
+    be able to halt in under a minute, without rotating credentials.
+
+    Halt is idempotent. The reason is audited and surfaced in the denial
+    payload returned to the agent.
+    """
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    operator = sanitise_string(operator, "operator", max_length=256)
+    reason = sanitise_string(reason, "reason", max_length=2048)
+    entry = supervisor.halt(session_id=session_id, operator=operator, reason=reason)
+    audit_logger.log(
+        action="agent.session.halt",
+        actor=operator,
+        target=session_id,
+        details={"halt_id": entry.halt_id, "reason": reason},
+        outcome="halted",
+        correlation_id=session_id,
+    )
+    return {"status": "halted", "halt": entry.model_dump(mode="json")}
+
+
+def finops_resume_session(session_id: str, operator: str, reason: str = "") -> dict[str, Any]:
+    """Lift a halt on a previously-halted agent session.
+
+    Resume is audited; the halt record retains both ``halted_at`` and
+    ``resumed_at`` so the trail shows both events.
+    """
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    operator = sanitise_string(operator, "operator", max_length=256)
+    reason = sanitise_string(reason, "reason", max_length=2048)
+    entry = supervisor.resume(session_id=session_id, operator=operator, reason=reason)
+    if entry is None:
+        return {"status": "not_halted", "session_id": session_id}
+    audit_logger.log(
+        action="agent.session.resume",
+        actor=operator,
+        target=session_id,
+        details={"halt_id": entry.halt_id, "reason": reason},
+        outcome="resumed",
+        correlation_id=session_id,
+    )
+    return {"status": "resumed", "halt": entry.model_dump(mode="json")}
+
+
+def finops_pending_approvals(
+    session_id: str | None = None,
+    approver: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List approval requests still awaiting a decision.
+
+    Optional filters: ``session_id`` narrows to a single agent session;
+    ``approver`` returns only requests where that approver is in the
+    request's pool (or the pool is empty / open).
+    """
+    if session_id:
+        session_id = sanitise_string(session_id, "session_id", max_length=256)
+    if approver:
+        approver = sanitise_string(approver, "approver", max_length=256)
+    limit = validate_query_limit(limit)
+    # Sweep expired before listing so callers see an honest queue.
+    approval_store.sweep_expired()
+    pending = approval_store.list_pending(session_id=session_id, approver=approver)
+    pending = pending[:limit]
+    return {
+        "count": len(pending),
+        "requests": [r.model_dump(mode="json") for r in pending],
+    }
+
+
+def finops_respond_approval(
+    request_id: str,
+    approver: str,
+    verdict: str,
+    notes: str = "",
+    token: str = "",
+) -> dict[str, Any]:
+    """Record an approver's decision on a pending approval request.
+
+    ``verdict`` must be ``"approved"`` or ``"denied"``. A decision token
+    bound to ``(request_id, approver, verdict)`` is issued and returned
+    in the response. If a token is *supplied* by the caller it is
+    verified (out-of-band gateways that route the response back through
+    this MCP tool include the token they were issued at request time).
+    Framework §5.2 — every approval emits a signed decision token.
+    """
+    request_id = sanitise_string(request_id, "request_id", max_length=256)
+    approver = sanitise_string(approver, "approver", max_length=256)
+    verdict = sanitise_string(verdict, "verdict", max_length=32).lower()
+    notes = sanitise_string(notes, "notes", max_length=2048)
+    if verdict not in ("approved", "denied"):
+        return {"status": "error", "message": "verdict must be 'approved' or 'denied'"}
+    parsed_verdict = ApprovalVerdict.APPROVED if verdict == "approved" else ApprovalVerdict.DENIED
+    if token and not verify_decision_token(
+        request_id=request_id,
+        approver=approver,
+        verdict=parsed_verdict,
+        token=token,
+    ):
+        audit_logger.log(
+            action="approval.token.invalid",
+            actor=approver,
+            target=request_id,
+            details={"verdict": verdict},
+            outcome="denied",
+        )
+        return {"status": "error", "message": "invalid decision token"}
+    try:
+        record = approval_store.record_decision(
+            request_id=request_id,
+            approver=approver,
+            verdict=parsed_verdict,
+            notes=notes,
+        )
+    except ApprovalNotFound:
+        return {"status": "error", "message": f"approval {request_id} not found"}
+    except ApprovalExpired:
+        return {"status": "expired", "message": f"approval {request_id} has expired"}
+    except PermissionError as exc:
+        return {"status": "error", "message": str(exc)}
+    last = record.decisions[-1] if record.decisions else None
+    audit_logger.log(
+        action=f"approval.{verdict}",
+        actor=approver,
+        target=request_id,
+        details={
+            "verdict": record.verdict.value,
+            "quorum": record.quorum,
+            "decisions": len(record.decisions),
+            "notes": notes,
+        },
+        correlation_id=record.session_id,
+    )
+    return {
+        "status": record.verdict.value,
+        "request": record.model_dump(mode="json"),
+        "decision_token": last.token if last else "",
+    }
+
+
+def finops_session_stats(session_id: str) -> dict[str, Any]:
+    """Per-session observability snapshot.
+
+    Returns observer metrics (call rate, tool distribution, token+cost
+    totals, last severity), the supervisor's halt status (if any), and
+    a list of pending approvals scoped to the session. Suitable for the
+    framework §10.3 post-action report and for dashboards.
+    """
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    snapshot = observer.snapshot(session_id) or {
+        "session_id": session_id,
+        "call_count": 0,
+        "tool_distribution": {},
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "calls_per_minute": 0.0,
+        "last_severity": "ok",
+    }
+    halt_status = supervisor.status(session_id)
+    pending = approval_store.list_pending(session_id=session_id)
+    # Signals from a fresh evaluate() pass with no budgets — purely informational.
+    signals = observer.evaluate(session_id)
+    return {
+        "session_id": session_id,
+        "metrics": snapshot,
+        "halt": halt_status,
+        "pending_approvals": [r.model_dump(mode="json") for r in pending],
+        "anomaly_signals": [s.model_dump(mode="json") for s in signals],
+    }
+
+
+def finops_replay_session(session_id: str, fmt: str = "markdown") -> dict[str, Any]:
+    """Reconstruct an end-to-end session transcript.
+
+    Pulls every audit entry whose ``correlation_id`` matches ``session_id``
+    (this is how ``ingest_agent_trace`` writes traces — ADR-008 §1) and
+    renders both a machine-readable list and a human-readable Markdown
+    transcript. Framework §9.3 — every session must be replayable.
+
+    ``fmt`` selects ``"markdown"`` (default) or ``"json"`` for the
+    rendered transcript. Both shapes are always present in the response;
+    ``fmt`` only chooses which one becomes the primary ``transcript``.
+    """
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    fmt = sanitise_string(fmt, "fmt", max_length=16).lower()
+    entries = [
+        e
+        for e in audit_logger.get_entries(limit=10_000)
+        if e.correlation_id == session_id or e.target == session_id
+    ]
+    if not entries:
+        return {
+            "status": "not_found",
+            "session_id": session_id,
+            "message": "no audit entries match this session_id",
+        }
+    json_entries = [e.model_dump(mode="json") for e in entries]
+    md_lines = [
+        f"# Session replay — {session_id}",
+        f"- **Entries:** {len(entries)}",
+        f"- **Window:** {entries[0].timestamp.isoformat()} → {entries[-1].timestamp.isoformat()}",
+        "",
+        "## Trail",
+    ]
+    for e in entries:
+        ts = e.timestamp.strftime("%H:%M:%S")
+        md_lines.append(
+            f"- `{ts}` **{e.action}** by `{e.actor}` → `{e.outcome}` (target: `{e.target}`)"
+        )
+    md = "\n".join(md_lines)
+    primary = md if fmt == "markdown" else json_entries
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "count": len(entries),
+        "transcript": primary,
+        "markdown": md,
+        "entries": json_entries,
+    }
+
+
 # ---------------------------------------------------------------------------
 # MCP Server tool registry -- maps tool names to callables
 # ---------------------------------------------------------------------------
@@ -801,6 +1084,30 @@ MCP_TOOLS: dict[str, dict[str, Any]] = {
         "function": finops_replay_events,
         "description": finops_replay_events.__doc__,
     },
+    "finops_halt_session": {
+        "function": finops_halt_session,
+        "description": finops_halt_session.__doc__,
+    },
+    "finops_resume_session": {
+        "function": finops_resume_session,
+        "description": finops_resume_session.__doc__,
+    },
+    "finops_pending_approvals": {
+        "function": finops_pending_approvals,
+        "description": finops_pending_approvals.__doc__,
+    },
+    "finops_respond_approval": {
+        "function": finops_respond_approval,
+        "description": finops_respond_approval.__doc__,
+    },
+    "finops_session_stats": {
+        "function": finops_session_stats,
+        "description": finops_session_stats.__doc__,
+    },
+    "finops_replay_session": {
+        "function": finops_replay_session,
+        "description": finops_replay_session.__doc__,
+    },
 }
 
 
@@ -810,10 +1117,11 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any
     All exceptions are caught and returned as safe error messages that
     don't leak internal file paths, class names, or stack traces.
 
-    When ``hub.governor.enabled`` is true, every call routes through
-    :func:`core.tool_governor.governed_call` which enforces policy,
-    budget, and argument gates before execution. Decisions are captured
-    as structured artifacts for audit reporting.
+    When ``hub.governor.enabled`` is true (the default since ADR-008),
+    every call routes through :func:`core.tool_governor.governed_call`
+    which enforces policy, budget, and argument gates before execution,
+    and consults the :class:`~core.agent_supervisor.AgentSupervisor` so
+    halted sessions short-circuit to ``Decision.DENY``.
     """
     tool = MCP_TOOLS.get(tool_name)
     if tool is None:
@@ -823,16 +1131,37 @@ def handle_tool_call(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any
         _init_governor()
     assert _GOVERNOR_REGISTRY is not None
     assert _GOVERNOR_POLICY is not None
-    assert _GOVERNOR_BUDGET is not None
 
-    request = ToolRequest(tool_name=tool_name, arguments=arguments, requester="mcp_client")
+    # Resolve principal + session for budget isolation and kill-switch.
+    # Callers (MCP transport layer) may pass these via reserved argument
+    # keys; we strip them before invoking the underlying tool so existing
+    # signatures stay untouched.
+    principal_id = str(arguments.pop("_principal_id", "")) or os.environ.get(
+        "FINOPS_MCP_PRINCIPAL", "default"
+    )
+    session_id = str(arguments.pop("_session_id", "")) or os.environ.get("FINOPS_MCP_SESSION", "")
+
+    request = ToolRequest(
+        tool_name=tool_name,
+        arguments=arguments,
+        requester="mcp_client",
+        principal_id=principal_id,
+        session_id=session_id,
+    )
+    # Observability hook — per-session metrics for finops_session_stats and
+    # anomaly detection. Doesn't block; signals are surfaced to the operator
+    # via finops_session_stats / finops_health_check.
+    if session_id:
+        observer.record_tool_call(session_id, tool_name)
+
     gov_result = governed_call(
         request,
         policy=_GOVERNOR_POLICY,
         registry=_GOVERNOR_REGISTRY,
-        budget=_GOVERNOR_BUDGET,
+        budget=_budget_for_principal(principal_id),
         artifacts=_GOVERNOR_ARTIFACTS,
         executor=lambda req: tool["function"](**req.arguments),
+        supervisor=supervisor,
     )
     if not gov_result.allowed:
         audit_logger.log(

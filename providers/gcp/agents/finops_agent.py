@@ -10,6 +10,20 @@ No API keys are used. All authentication is via:
 - Application Default Credentials (development)
 - Workload Identity Federation (production on GKE/Cloud Run)
 
+Governance wiring (ADR-008 §1, §4, §5, §6):
+
+* :func:`_before_model_callback` runs platform content filters
+  (PIIRedactor, PromptInjectionHeuristic, SecretScanner) over every
+  prompt that reaches Gemini.
+* :func:`_before_tool_callback` consults :class:`AgentSupervisor` and
+  short-circuits any tool call against a halted session.
+* :func:`_after_tool_callback` records the call into
+  :class:`AgentObserver` for anomaly detection.
+* :func:`create_gcp_finops_runner` wires the agent into an ADK
+  ``Runner`` with :class:`ADKTracePlugin` (framework §9.1).
+* :data:`SAFETY_SETTINGS` sets explicit per-HarmCategory thresholds
+  (framework §11.4 / G-G4); never left at provider defaults.
+
 Reference: https://docs.cloud.google.com/agent-builder/agent-development-kit/overview
 """
 
@@ -18,17 +32,236 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from core.agent_observer import global_observer
+from core.agent_supervisor import global_supervisor
+from core.filters import (
+    PIIRedactor,
+    PromptInjectionHeuristic,
+    SecretScanner,
+)
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SAFETY_SETTINGS",
     "analyse_billing_costs",
     "check_label_compliance",
     "create_gcp_finops_agent",
     "create_gcp_finops_agent_with_mcp",
+    "create_gcp_finops_runner",
     "detect_costly_resources",
     "get_budget_status",
     "recommend_cost_optimisations",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Governance singletons — module-level so they survive across callbacks.
+# ---------------------------------------------------------------------------
+
+_PII = PIIRedactor()
+_INJECTION = PromptInjectionHeuristic()
+_SECRETS = SecretScanner()
+
+
+# ---------------------------------------------------------------------------
+# Gemini safety_settings — explicit thresholds per HarmCategory.
+#
+# Framework §11.4 / G-G4 — never leave at provider defaults. These are
+# strings rather than enum values so this module imports cleanly when
+# google.genai is not installed; the actual enum lookup happens inside
+# :func:`_build_safety_settings`.
+# ---------------------------------------------------------------------------
+
+SAFETY_SETTINGS: list[dict[str, str]] = [
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_LOW_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+]
+
+
+def _build_safety_settings() -> Any:
+    """Translate the string config into google.genai SafetySetting objects.
+
+    Returns ``None`` when google.genai is not available so the agent
+    still builds in environments without the Vertex SDK installed.
+    """
+    try:
+        from google.genai import types as genai_types
+    except ImportError:
+        return None
+    return [
+        genai_types.SafetySetting(
+            category=getattr(genai_types.HarmCategory, s["category"]),
+            threshold=getattr(genai_types.HarmBlockThreshold, s["threshold"]),
+        )
+        for s in SAFETY_SETTINGS
+    ]
+
+
+def _build_generate_content_config() -> Any:
+    """Build a GenerateContentConfig with explicit safety_settings.
+
+    Returns ``None`` when google.genai is not available.
+    """
+    try:
+        from google.genai import types as genai_types
+    except ImportError:
+        return None
+    return genai_types.GenerateContentConfig(safety_settings=_build_safety_settings())
+
+
+# ---------------------------------------------------------------------------
+# Callbacks — ADK governance hooks (ADR-008 §1, §4, §6)
+# ---------------------------------------------------------------------------
+
+
+def _extract_session_id(ctx: Any) -> str:
+    """Best-effort session_id extraction from heterogeneous ADK contexts."""
+    for attr in ("session_id", "id"):
+        sid = getattr(ctx, attr, None)
+        if sid:
+            return str(sid)
+    invocation = getattr(ctx, "invocation_context", None)
+    if invocation is not None:
+        session = getattr(invocation, "session", None)
+        sid = getattr(session, "id", None) or getattr(session, "session_id", None)
+        if sid:
+            return str(sid)
+    return ""
+
+
+def _before_model_callback(callback_context: Any, llm_request: Any) -> Any:
+    """Run filter stack over the outgoing prompt; redact or block on match.
+
+    Returning ``None`` lets the request proceed unmodified. Returning an
+    ``LlmResponse`` (we use the synthetic block-message form below)
+    short-circuits before the model is invoked — framework §11.2 / §11.3.
+    """
+    try:
+        # Heuristic: pull the text payload from the last user content.
+        contents = getattr(llm_request, "contents", None) or []
+        if not contents:
+            return None
+        last = contents[-1]
+        parts = getattr(last, "parts", None) or []
+        text = " ".join(getattr(p, "text", "") for p in parts if getattr(p, "text", None))
+        if not text:
+            return None
+
+        secret_verdict = _SECRETS.apply(text)
+        if secret_verdict.verdict == "block":
+            logger.warning(
+                "Secret detected in prompt; blocking. cats=%s", secret_verdict.matched_categories
+            )
+            return _blocked_response(
+                "Request blocked: detected what appears to be credentials in the prompt. "
+                "Strip the secret and try again."
+            )
+        injection_verdict = _INJECTION.apply(text)
+        if injection_verdict.verdict == "block":
+            logger.warning(
+                "Prompt-injection heuristic triggered; blocking. cats=%s",
+                injection_verdict.matched_categories,
+            )
+            return _blocked_response(
+                "Request blocked: prompt-injection patterns detected. "
+                "Please rephrase without embedded instruction overrides."
+            )
+        pii_verdict = _PII.apply(text)
+        if pii_verdict.verdict == "redact" and pii_verdict.redacted_text:
+            # Mutate the last user part to the redacted form. ADK doesn't
+            # mind in-place mutation of the request before delivery.
+            for p in parts:
+                if getattr(p, "text", None):
+                    p.text = pii_verdict.redacted_text
+                    break
+    except Exception:
+        logger.exception("before_model callback failure (request still allowed)")
+    return None
+
+
+def _before_tool_callback(tool: Any, args: dict[str, Any], tool_context: Any) -> Any:
+    """Consult AgentSupervisor; short-circuit tool calls against halted sessions.
+
+    Returns ``None`` to allow the call to proceed; returns a dict
+    ``{"status": "halted", ...}`` to override with a deny response.
+    """
+    try:
+        sid = _extract_session_id(tool_context)
+        if not sid:
+            return None
+        halt = global_supervisor().is_halted(sid)
+        if halt is not None:
+            logger.warning(
+                "Session %s halted by %s; denying tool call %s",
+                sid,
+                halt.operator,
+                getattr(tool, "name", "?"),
+            )
+            return {
+                "status": "halted",
+                "halt_id": halt.halt_id,
+                "operator": halt.operator,
+                "reason": halt.reason,
+                "message": "session halted; tool call denied",
+            }
+    except Exception:
+        logger.exception("before_tool callback failure (call still allowed)")
+    return None
+
+
+def _after_tool_callback(
+    tool: Any, args: dict[str, Any], tool_context: Any, tool_response: Any
+) -> Any:
+    """Record the tool call into AgentObserver for anomaly detection."""
+    try:
+        sid = _extract_session_id(tool_context)
+        if sid:
+            global_observer().record_tool_call(sid, getattr(tool, "name", "unknown"))
+    except Exception:
+        logger.exception("after_tool callback failure")
+    return None
+
+
+def _after_model_callback(callback_context: Any, llm_response: Any) -> Any:
+    """Record token + cost telemetry into AgentObserver."""
+    try:
+        usage = getattr(llm_response, "usage_metadata", None)
+        if usage is None:
+            return None
+        sid = _extract_session_id(callback_context)
+        if not sid:
+            return None
+        global_observer().record_tokens(
+            sid,
+            input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
+            output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
+            # Cost is computed downstream; observer accepts USD if available.
+            estimated_cost_usd=float(getattr(usage, "estimated_cost_usd", 0.0) or 0.0),
+        )
+    except Exception:
+        logger.exception("after_model callback failure")
+    return None
+
+
+def _blocked_response(message: str) -> Any:
+    """Construct a synthetic ADK LlmResponse representing a blocked turn."""
+    try:
+        from google.adk.models.llm_response import LlmResponse
+        from google.genai import types as genai_types
+
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text=message)],
+            )
+        )
+    except ImportError:
+        # If ADK isn't installed the callback won't be invoked; return a
+        # dict so test harnesses can still assert on the shape.
+        return {"status": "blocked", "message": message}
 
 
 # ---------------------------------------------------------------------------
@@ -375,20 +608,22 @@ def create_gcp_finops_agent():
     """Create the GCP FinOps ADK agent.
 
     Returns:
-        A google.adk Agent configured with FinOps tools and Gemini model.
+        A google.adk Agent configured with FinOps tools, Gemini model,
+        explicit safety_settings, and the four governance callbacks
+        (before_model / before_tool / after_tool / after_model).
     """
     try:
         from google.adk.agents import Agent
 
-        return Agent(
-            model="gemini-2.5-flash",
-            name="gcp_finops_agent",
-            description=(
+        agent_kwargs: dict[str, Any] = {
+            "model": "gemini-2.5-flash",
+            "name": "gcp_finops_agent",
+            "description": (
                 "GCP FinOps agent that monitors cloud costs, detects anomalies, "
                 "enforces tagging compliance, and recommends optimisations. "
                 "Uses native GCP APIs with Workload Identity Federation."
             ),
-            instruction="""You are a GCP FinOps governance agent. Your role is to:
+            "instruction": """You are a GCP FinOps governance agent. Your role is to:
 
 1. MONITOR: Analyse billing data to identify cost trends and anomalies.
 2. DETECT: Find costly resources that exceed thresholds.
@@ -405,16 +640,87 @@ When generating alerts or reports:
 
 You advocate for accountability and responsible cloud spending.
 All your actions are audited for governance compliance.""",
-            tools=[
+            "tools": [
                 analyse_billing_costs,
                 detect_costly_resources,
                 check_label_compliance,
                 get_budget_status,
                 recommend_cost_optimisations,
             ],
-        )
+            # ADR-008 §1, §4, §6 — governance callbacks.
+            "before_model_callback": _before_model_callback,
+            "before_tool_callback": _before_tool_callback,
+            "after_tool_callback": _after_tool_callback,
+            "after_model_callback": _after_model_callback,
+        }
+        # Attach safety_settings via generate_content_config when supported.
+        config = _build_generate_content_config()
+        if config is not None:
+            agent_kwargs["generate_content_config"] = config
+
+        return Agent(**agent_kwargs)
     except ImportError:
         logger.warning("google-adk not installed. Install with: pip install google-adk")
+        return None
+    except TypeError:
+        # Older ADK Agent constructor may not accept generate_content_config
+        # or some callback names. Retry with the minimum-viable set so we
+        # still ship safety semantics in degraded form.
+        try:
+            from google.adk.agents import Agent
+
+            return Agent(
+                model="gemini-2.5-flash",
+                name="gcp_finops_agent",
+                description=agent_kwargs["description"],
+                instruction=agent_kwargs["instruction"],
+                tools=agent_kwargs["tools"],
+                before_model_callback=_before_model_callback,
+                before_tool_callback=_before_tool_callback,
+            )
+        except Exception:
+            logger.exception("Failed to construct ADK Agent")
+            return None
+
+
+def create_gcp_finops_runner(session_id: str | None = None, correlation_id: str = ""):
+    """Build an ADK Runner with the FinOps agent and ``ADKTracePlugin``.
+
+    Returns ``None`` when google-adk is not installed; callers should
+    fall back to :func:`create_gcp_finops_agent` for the bare agent.
+
+    Framework §9.1 — every session's trace lands in the canonical
+    ``AgentTrace`` model via the plugin, then into the audit trail via
+    :meth:`AuditLogger.ingest_agent_trace`.
+    """
+    agent = create_gcp_finops_agent()
+    if agent is None:
+        return None
+    try:
+        from google.adk.runners import Runner
+
+        from providers.gcp.agent_trace_plugin import create_trace_plugin
+
+        plugin = create_trace_plugin(
+            agent_name="gcp_finops_agent",
+            session_id=session_id or "",
+            correlation_id=correlation_id,
+        )
+        # ADK Runner's signature drifts across versions (some require a
+        # session_service, some don't). Build kwargs dynamically and let
+        # TypeError fall through to the older constructor path.
+        runner_kwargs: dict[str, Any] = {"agent": agent, "plugins": [plugin]}
+        try:
+            return Runner(**runner_kwargs)  # type: ignore[call-arg]
+        except TypeError:
+            return Runner(agent=agent)  # type: ignore[call-arg]
+    except ImportError:
+        logger.warning(
+            "google-adk runners not available; returning bare Agent without Runner+Plugins"
+        )
+        return None
+    except TypeError:
+        logger.exception("Failed to construct ADK Runner")
         return None
 
 

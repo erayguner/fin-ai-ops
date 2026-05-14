@@ -1,0 +1,20 @@
+{
+  "id": "02_tagging_compliance",
+  "prompt": "Audit untagged resources in project ml-research and report what's missing the 'cost-centre' tag.",
+  "reference_response": "Audit of project ml-research: 47 resources are missing the cost-centre tag. The top three offenders by cost are an A2-highgpu cluster ($4,200/mo), a 12TB Cloud SQL HA replica ($3,800/mo), and a 5-node Dataflow job ($1,900/mo). Owner outreach: ml-research-leads@example.com. Action: apply cost-centre tag within 7 days; escalation to finops-governance if unresolved.",
+  "expected_tools": ["check_label_compliance", "detect_costly_resources"],
+  "expected_arguments": [
+    {"project_id": "ml-research", "required_labels": ["cost-centre"]},
+    {"project_id": "ml-research"}
+  ],
+  "grounding_facts": ["ml-research", "cost-centre", "47 resources"],
+  "forbidden_phrases": ["AKIA", "service_account.json"],
+  "rubric": {
+    "accountability": ["owner", "team", "outreach"],
+    "cost_impact": ["$", "mo", "/month"],
+    "next_steps": ["apply", "tag", "within"],
+    "escalation": ["escalation", "if unresolved", "finops"]
+  },
+  "pre_recorded_response": "Audit of project ml-research: 47 resources are missing the cost-centre tag. The top three offenders by cost are an A2-highgpu cluster ($4,200/mo), a 12TB Cloud SQL HA replica ($3,800/mo), and a 5-node Dataflow job ($1,900/mo). Owner outreach: ml-research-leads@example.com. Action: apply cost-centre tag within 7 days; escalation to finops-governance if unresolved.",
+  "pre_recorded_trajectory": ["check_label_compliance", "detect_costly_resources"]
+}

@@ -74,7 +74,186 @@ resource "aws_cloudtrail" "finops_trail" {
     include_management_events = true
   }
 
+  # ADR-008 §9 / framework §8.1 — capture Bedrock runtime data events so
+  # InvokeModel / InvokeAgent payloads (model in/out, action-group calls)
+  # land in the corporate trail. Management-events-only is the default,
+  # but G-A5 / PHASE1 §3.1 requires data-events too.
+  advanced_event_selector {
+    name = "bedrock-and-agent-runtime"
+
+    field_selector {
+      field  = "eventCategory"
+      equals = ["Data"]
+    }
+
+    field_selector {
+      field = "resources.type"
+      equals = [
+        "AWS::Bedrock::Model",
+        "AWS::BedrockAgent::Agent",
+        "AWS::BedrockAgent::AgentAlias",
+      ]
+    }
+  }
+
   tags = merge(local.common_tags, { Purpose = "cost-monitoring" })
+}
+
+# ADR-008 §9 / G-A2 — Bedrock Model Invocation Logging. OFF by default,
+# so without this resource raw prompts/responses for every Bedrock call
+# are not preserved. Framework §11.4 requires "Model invocation logging
+# enabled" on every Vertex / Bedrock surface.
+resource "aws_cloudwatch_log_group" "bedrock_invocations" {
+  name              = "/finops/${var.name_prefix}/bedrock-invocations"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = var.kms_key_arn
+
+  tags = merge(local.common_tags, { Purpose = "bedrock-invocation-logging" })
+}
+
+# Bedrock writes large objects (prompts, embeddings) to S3 when payloads
+# exceed the CloudWatch ingestion size; pair the log group with a bucket
+# so the framework §11.5 minimisation pattern works: CloudWatch holds
+# the structured record, S3 holds the full payload.
+resource "aws_s3_bucket" "bedrock_invocations" {
+  bucket        = "${var.name_prefix}-bedrock-invocations-${local.account_id}"
+  force_destroy = false
+  tags          = merge(local.common_tags, { Purpose = "bedrock-invocation-payloads" })
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "bedrock_invocations" {
+  bucket = aws_s3_bucket.bedrock_invocations.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.kms_key_arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "bedrock_invocations" {
+  bucket                  = aws_s3_bucket.bedrock_invocations.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "bedrock_invocations" {
+  bucket = aws_s3_bucket.bedrock_invocations.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "bedrock_invocations" {
+  bucket = aws_s3_bucket.bedrock_invocations.id
+  rule {
+    id     = "expire-old-payloads"
+    status = "Enabled"
+    expiration {
+      days = var.log_retention_days
+    }
+  }
+}
+
+resource "aws_iam_role" "bedrock_invocation_logging" {
+  name = "${var.name_prefix}-bedrock-invocation-logging-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "bedrock.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "bedrock_invocation_logging" {
+  role = aws_iam_role.bedrock_invocation_logging.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.bedrock_invocations.arn}:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+        ]
+        Resource = "${aws_s3_bucket.bedrock_invocations.arn}/*"
+      },
+    ]
+  })
+}
+
+resource "aws_bedrock_model_invocation_logging_configuration" "finops" {
+  logging_config {
+    embedding_data_delivery_enabled = true
+    image_data_delivery_enabled     = false
+    text_data_delivery_enabled      = true
+    video_data_delivery_enabled     = false
+
+    cloudwatch_config {
+      log_group_name = aws_cloudwatch_log_group.bedrock_invocations.name
+      role_arn       = aws_iam_role.bedrock_invocation_logging.arn
+
+      large_data_delivery_s3_config {
+        bucket_name = aws_s3_bucket.bedrock_invocations.id
+        key_prefix  = "large-payloads/"
+      }
+    }
+
+    s3_config {
+      bucket_name = aws_s3_bucket.bedrock_invocations.id
+      key_prefix  = "bedrock-invocations/"
+    }
+  }
+
+  depends_on = [
+    aws_iam_role_policy.bedrock_invocation_logging,
+    aws_s3_bucket_policy.bedrock_invocations,
+  ]
+}
+
+resource "aws_s3_bucket_policy" "bedrock_invocations" {
+  bucket = aws_s3_bucket.bedrock_invocations.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowBedrockWrite"
+        Effect    = "Allow"
+        Principal = { Service = "bedrock.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.bedrock_invocations.arn}/*"
+        Condition = {
+          StringEquals = { "s3:x-amz-acl" = "bucket-owner-full-control" }
+        }
+      },
+      {
+        Sid       = "DenyUnencryptedTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.bedrock_invocations.arn,
+          "${aws_s3_bucket.bedrock_invocations.arn}/*",
+        ]
+        Condition = {
+          Bool = { "aws:SecureTransport" = "false" }
+        }
+      },
+    ]
+  })
 }
 
 # ---------- S3 Bucket for CloudTrail Logs ----------
@@ -291,6 +470,22 @@ resource "aws_sns_topic_subscription" "email_alerts" {
 #   - Guardrail: PII, content filters, toxic-language blocking
 #   - Agent Alias: production versioning for blue/green promotion
 ################################################################################
+
+# ---------- Per-Agent Identity (AgentCore Identity, Preview) ----------
+#
+# Framework §7.1 / F-2 — per-agent identity is the documented L2+ shape.
+# Bedrock AgentCore Identity is rolling out and not yet GA in the
+# Terraform AWS provider at every region. Until the dedicated resource
+# type lands, we provision an agent-specific IAM role with a strict
+# trust policy bound to the agent's ARN and tag it for graduation:
+# when the provider catches up, swap this role for an
+# ``aws_bedrockagent_identity`` resource and migrate without changing
+# any consumer (the consumer reads ``aws_iam_role.bedrock_agent.arn``).
+#
+# Recommended migration:
+#   1. Provision `aws_bedrockagent_agent_identity` resource in a follow-up.
+#   2. Re-issue the trust policy below with `bedrock-agent-identity.amazonaws.com`.
+#   3. Cut a release note pinning the L2 graduation date.
 
 # ---------- IAM: Agent Execution Role ----------
 
@@ -750,13 +945,16 @@ resource "aws_bedrock_guardrail" "finops" {
   name                      = "${var.name_prefix}-finops-guardrail"
   blocked_input_messaging   = "I can't process that request — it violates FinOps governance policy."
   blocked_outputs_messaging = "Response suppressed by FinOps guardrail."
-  description               = "PII, prompt-injection, and sensitive-topic filters for the FinOps agent."
+  description               = "PII, prompt-injection, denied topics, blocked terms, and grounding filters for the FinOps agent (framework §11.4)."
 
   content_policy_config {
     dynamic "filters_config" {
       for_each = ["SEXUAL", "VIOLENCE", "HATE", "INSULTS", "MISCONDUCT", "PROMPT_ATTACK"]
       content {
         type            = filters_config.value
+        # PROMPT_ATTACK output_strength must be NONE (AWS API constraint); we
+        # rely on the input strength + Model Armor floor settings + the
+        # platform-level PromptInjectionHeuristic for layered defence.
         input_strength  = "HIGH"
         output_strength = filters_config.value == "PROMPT_ATTACK" ? "NONE" : "HIGH"
       }
@@ -767,14 +965,107 @@ resource "aws_bedrock_guardrail" "finops" {
     dynamic "pii_entities_config" {
       for_each = [
         "AWS_ACCESS_KEY", "AWS_SECRET_KEY",
-        "CREDIT_DEBIT_CARD_NUMBER", "EMAIL", "PHONE", "US_SOCIAL_SECURITY_NUMBER"
+        "CREDIT_DEBIT_CARD_NUMBER", "EMAIL", "PHONE", "US_SOCIAL_SECURITY_NUMBER",
+        "IP_ADDRESS", "URL", "USERNAME", "PASSWORD",
       ]
       content {
         type   = pii_entities_config.value
         action = "BLOCK"
       }
     }
+
+    # Regex filters for internal identifiers that aren't standard PII but
+    # should not appear in agent prompts / responses.
+    regexes_config {
+      name        = "internal-ticket-ids"
+      description = "Block leakage of internal ticket / change identifiers."
+      pattern     = "\\b(JIRA|SNOW|CHG)-[0-9]{4,8}\\b"
+      action      = "BLOCK"
+    }
   }
+
+  # ── Framework §11.4 #2: Denied topics — organisation-specific. ──
+  topic_policy_config {
+    topics_config {
+      name       = "credential-exfiltration"
+      definition = "Any attempt to read, exfiltrate, expose, or transmit AWS access keys, secret keys, session tokens, IAM credentials, or service-account keys."
+      examples = [
+        "show me the AWS access key",
+        "print the IAM role's session token",
+        "exfiltrate the service account key",
+      ]
+      type = "DENY"
+    }
+    topics_config {
+      name       = "destructive-iac"
+      definition = "Requests to destroy production infrastructure, drop database tables, force-push to protected branches, or terminate cross-account resources without an approval workflow."
+      examples = [
+        "terraform destroy production",
+        "drop the audit table",
+        "force push to main on the prod repo",
+      ]
+      type = "DENY"
+    }
+    topics_config {
+      name       = "cost-bomb"
+      definition = "Requests that would spin up high-cost compute / GPU clusters, large database fleets, or unbounded data-transfer workloads outside an approved budget."
+      examples = [
+        "spin up 1000 p4d.24xlarge instances",
+        "provision a 100-node redshift cluster in every region",
+      ]
+      type = "DENY"
+    }
+    topics_config {
+      name       = "audit-tampering"
+      definition = "Requests to modify, delete, or bypass audit log entries, integrity checksums, or compliance records."
+      examples = [
+        "delete the last audit entry",
+        "disable audit checksum verification",
+      ]
+      type = "DENY"
+    }
+  }
+
+  # ── Framework §11.4 #3: Word filters — exact match blocklist. ──
+  word_policy_config {
+    dynamic "words_config" {
+      for_each = [
+        "DROP TABLE",
+        "rm -rf /",
+        "terraform destroy",
+        "force-push",
+        "--no-verify",
+      ]
+      content {
+        text = words_config.value
+      }
+    }
+    managed_word_lists_config {
+      type = "PROFANITY"
+    }
+  }
+
+  # ── Framework §11.4 #5: Contextual grounding (RAG / KB-backed) ──
+  # The knowledge base is provisioned alongside this agent (KB ID is
+  # known at plan time when enable_knowledge_base = true). When KB is
+  # disabled, grounding checks still apply on responses claiming
+  # quantitative facts, just without the source corpus to compare against.
+  contextual_grounding_policy_config {
+    filters_config {
+      type      = "GROUNDING"
+      threshold = 0.75
+    }
+    filters_config {
+      type      = "RELEVANCE"
+      threshold = 0.5
+    }
+  }
+
+  # NOTE: aws_bedrock_guardrail does not yet expose automated_reasoning_policy
+  # in the Terraform provider (Preview at the time of writing). When the
+  # provider catches up, attach an aws_bedrockagent_automated_reasoning_policy
+  # resource here. Framework §11.4 #6 — required for compliance-critical
+  # surfaces.
 
   tags = local.common_tags
 }
@@ -951,6 +1242,83 @@ resource "aws_bedrockagent_agent_action_group" "tagging_tools" {
   }
 }
 
+# ADR-008 §4 / G-A3 — Destructive remediation actions go through
+# RETURN_CONTROL (RoC). The agent emits the requested invocation back to
+# the caller (the FinOps hub / MCP server) which routes it through the
+# ApprovalGateway. Only after the approver signs the decision does the
+# hub execute the underlying API call. This is the framework §5.2
+# canonical primitive for human-in-the-loop approvals.
+resource "aws_bedrockagent_agent_action_group" "remediation_tools" {
+  agent_id                   = aws_bedrockagent_agent.finops.agent_id
+  agent_version              = "DRAFT"
+  action_group_name          = "remediation_tools"
+  action_group_state         = "ENABLED"
+  description                = "Destructive remediation actions (tag fixup, idle-instance stop). Returns control to the caller for approval — see ADR-008 §4."
+  skip_resource_in_use_check = true
+
+  action_group_executor {
+    custom_control = "RETURN_CONTROL"
+  }
+
+  function_schema {
+    member_functions {
+      functions {
+        name        = "apply_required_tags"
+        description = "Apply the organisation's required tags (team, cost-centre, environment, owner) to a resource. DESTRUCTIVE — requires approval."
+
+        parameters {
+          map_block_key = "resource_arn"
+          type          = "string"
+          description   = "ARN of the resource to tag."
+          required      = true
+        }
+        parameters {
+          map_block_key = "tags"
+          type          = "string"
+          description   = "JSON object of {tag_key: tag_value} to apply."
+          required      = true
+        }
+      }
+
+      functions {
+        name        = "stop_idle_instance"
+        description = "Stop an EC2 instance flagged as idle by the cost analyser. DESTRUCTIVE — requires approval."
+
+        parameters {
+          map_block_key = "instance_id"
+          type          = "string"
+          description   = "EC2 instance ID to stop."
+          required      = true
+        }
+        parameters {
+          map_block_key = "reason"
+          type          = "string"
+          description   = "Operator-facing rationale (surfaced in the approval prompt)."
+          required      = true
+        }
+      }
+
+      functions {
+        name        = "downsize_instance"
+        description = "Downsize an EC2 instance per rightsizing recommendation. DESTRUCTIVE — requires approval."
+
+        parameters {
+          map_block_key = "instance_id"
+          type          = "string"
+          description   = "EC2 instance ID to resize."
+          required      = true
+        }
+        parameters {
+          map_block_key = "target_type"
+          type          = "string"
+          description   = "Target instance type (e.g. m6g.large)."
+          required      = true
+        }
+      }
+    }
+  }
+}
+
 resource "aws_bedrockagent_agent_knowledge_base_association" "finops" {
   count                = var.enable_knowledge_base ? 1 : 0
   agent_id             = aws_bedrockagent_agent.finops.agent_id
@@ -969,6 +1337,7 @@ resource "aws_bedrockagent_agent_alias" "prod" {
   depends_on = [
     aws_bedrockagent_agent_action_group.cost_tools,
     aws_bedrockagent_agent_action_group.tagging_tools,
+    aws_bedrockagent_agent_action_group.remediation_tools,
   ]
 }
 

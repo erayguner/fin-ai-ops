@@ -107,3 +107,67 @@ jobs:
 
       - name: Run health check
         run: python scripts/repo_health.py
+
+  # ADR-008 §10 / framework §16.3 — six-dimension regression eval gate.
+  # Runs the offline harness on every PR. Production / nightly runs flip
+  # EVAL_BACKEND=adk to invoke the real agent.
+  agent-eval:
+    name: Agent Regression Eval
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run agent eval harness (offline)
+        env:
+          EVAL_BACKEND: offline
+        run: pytest tests/agent_eval -q
+
+  # ADR-008 §8 / framework §6.3 — governor dry-run + content-filter smoke
+  # tests block PRs that regress the structured sandbox.
+  governor-and-filters-smoke:
+    name: Governor & Filter Smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Governor dry-run + filter smoke
+        run: |
+          pytest tests/test_tool_governor.py tests/test_filters.py \
+                 tests/test_audit_hardening.py tests/test_mcp_server.py -q
+          python scripts/governor_dry_run.py

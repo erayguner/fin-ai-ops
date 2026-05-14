@@ -1,7 +1,48 @@
 # ADR-008: Agent Governance Model — End-to-End Traceability, Approval, and Override
 
-**Status:** Accepted
-**Date:** 2026-04-17
+**Status:** Accepted (revised 2026-05-14)
+**Date:** 2026-04-17 (revised 2026-05-14)
+
+## Implementation status (2026-05-14)
+
+This section tracks the gap between the ADR and the codebase. Maps onto
+the §1-§10 decisions of this document. See
+`docs/governance/PHASE1_GAP_REPORT.md` for the original gap list.
+
+| § | Decision | Status | Pointer |
+|---|---|---|---|
+| §1 | Canonical `AgentTrace` / `AgentStep` / `DecisionRecord` | ✅ Implemented | `core/agent_trace.py` |
+| §1 | OpenTelemetry span emission | ✅ Implemented | `AgentTrace.to_otel_spans()` |
+| §2 | Bedrock trace adapter | ✅ Implemented (customOrchestrationTrace + callerChain wired 2026-05-14) | `providers/aws/agent_trace_adapter.py` |
+| §2 | ADK trace plugin (`BasePlugin` subclass at runtime) | ✅ Implemented | `providers/gcp/agent_trace_plugin.py` |
+| §3 | Audit chain-across-files + signed manifest + `export_signed` | ✅ Implemented | `core/audit.py` |
+| §4 | `ApprovalRequest` / `ApprovalDecision` / `ApprovalStore` | ✅ Implemented 2026-05-14 | `core/approvals.py` |
+| §4 | `LocalCLI` / `Webhook` / `Slack` gateways | ✅ Implemented 2026-05-14 | `core/approvals.py` |
+| §4 | Kill-switch (`AgentSupervisor.halt`) | ✅ Implemented 2026-05-14 | `core/agent_supervisor.py` |
+| §4 | `finops_pending_approvals` / `finops_respond_approval` / `finops_halt_session` / `finops_resume_session` MCP tools | ✅ Implemented 2026-05-14 | `mcp_server/server.py` |
+| §4 | RETURN_CONTROL on destructive AWS action groups | ✅ Wired 2026-05-14 | `providers/aws/terraform/main.tf` (`remediation_tools`) |
+| §5 | Behavioural anomaly observer | ✅ Implemented 2026-05-14 | `core/agent_observer.py` |
+| §5 | Reconciliation expired-approval check | ✅ Implemented 2026-05-14 | `agents/reconciliation_agent.py::_check_expired_approvals` |
+| §6 | Platform filter stack (PII / injection / secrets) | ✅ Implemented | `core/filters.py` |
+| §6 | ADK callbacks wired (before_model / before_tool / after_*) | ✅ Implemented 2026-05-14 | `providers/gcp/agents/finops_agent.py` |
+| §7 | `finops_replay_session` MCP tool | ✅ Implemented 2026-05-14 | `mcp_server/server.py` |
+| §8 | Governor fail-closed by default | ✅ Implemented 2026-05-14 | `mcp_server/server.py` |
+| §8 | Per-principal `BudgetTracker` keyring | ✅ Implemented 2026-05-14 | `mcp_server/server.py::_budget_for_principal` |
+| §9 | Bedrock model invocation logging + expanded guardrail (denied topics, word filters, contextual grounding) | ✅ Implemented 2026-05-14 | `providers/aws/terraform/main.tf` |
+| §9 | CloudTrail data events for Bedrock runtime | ✅ Implemented 2026-05-14 | `providers/aws/terraform/main.tf` |
+| §9 | Model Armor template + floor settings (Preview, gated) | ✅ Implemented 2026-05-14 | `providers/gcp/terraform/main.tf` |
+| §9 | Vertex Data-Access audit logs | ✅ Implemented 2026-05-14 | `providers/gcp/terraform/main.tf` |
+| §10 | 6-dimension regression eval harness + CI gate | ✅ Implemented 2026-05-14 | `tests/agent_eval/`, `.github/workflows/finops-self-maintain.yml` |
+
+**Outstanding (deferred to follow-up):**
+
+- Per-agent identity (Vertex Agent Identity / Bedrock AgentCore Identity) — Preview-tier providers; scaffolded with migration notes.
+- VPC-SC perimeter Terraform — requires Org Admin; documented in `docs/runbooks/vpc-sc-perimeter.md`.
+- SLSA L2+ container signing — documented in `docs/runbooks/supply-chain.md`.
+- Quarterly red-team cadence and DR exercise — operational, tracked in `docs/runbooks/red-team-findings.md`.
+- Automated Reasoning Guardrail policy — Terraform provider does not yet expose the resource.
+
+
 
 ## Context
 

@@ -68,11 +68,153 @@ resource "google_project_service" "required_apis" {
     "storage.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+    # ADR-008 §9 — agent governance surfaces
+    "modelarmor.googleapis.com",          # G-G3 / F-7
+    "accesscontextmanager.googleapis.com", # G-G6 (VPC-SC scaffold)
   ])
 
   project            = var.project_id
   service            = each.value
   disable_on_destroy = false
+}
+
+# ADR-008 §9 / G-G5 — Vertex AI Data-Access audit logs. Admin-Activity logs
+# are on by default; DATA_READ / DATA_WRITE are off-by-default and must be
+# explicitly enabled to capture InvokeAgent-level payloads. Framework §8.1
+# requires every model invocation to be recorded.
+resource "google_project_iam_audit_config" "aiplatform" {
+  project = var.project_id
+  service = "aiplatform.googleapis.com"
+
+  audit_log_config {
+    log_type = "ADMIN_READ"
+  }
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+}
+
+# Same for Model Armor — every inspect/block decision should land in the
+# corporate audit trail.
+resource "google_project_iam_audit_config" "modelarmor" {
+  project = var.project_id
+  service = "modelarmor.googleapis.com"
+
+  audit_log_config {
+    log_type = "ADMIN_READ"
+  }
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+
+  depends_on = [google_project_service.required_apis]
+}
+
+# ADR-008 §9 / G-G3 / F-7 — Model Armor template. Filters inspect every
+# prompt and response sent through any Vertex AI endpoint and any
+# Google-managed MCP server attached to this template. Framework §11.4
+# mandates INSPECT_AND_BLOCK on Vertex; we set it as the default
+# enforcement mode and let dev / staging override via the variable.
+resource "google_model_armor_template" "finops" {
+  provider    = google-beta
+  parent      = "projects/${var.project_id}/locations/${var.region}"
+  template_id = "${var.name_prefix}-finops-model-armor"
+
+  filter_config {
+    # Responsible-AI filters — framework §11.4 #1.
+    rai_settings {
+      rai_filters {
+        filter_type      = "HATE_SPEECH"
+        confidence_level = "HIGH"
+      }
+      rai_filters {
+        filter_type      = "HARASSMENT"
+        confidence_level = "HIGH"
+      }
+      rai_filters {
+        filter_type      = "SEXUALLY_EXPLICIT"
+        confidence_level = "HIGH"
+      }
+      rai_filters {
+        filter_type      = "DANGEROUS"
+        confidence_level = "HIGH"
+      }
+    }
+
+    # Prompt-injection + jailbreak — framework §11.4 #1 (Prompt Attack).
+    pi_and_jailbreak_filter_settings {
+      filter_enforcement = "ENABLED"
+      confidence_level   = "LOW_AND_ABOVE"
+    }
+
+    # PII screening — framework §11.4 #4. Both inspect-only (so the
+    # findings flow to logs / SCC) and block on high-confidence matches.
+    sdp_settings {
+      basic_config {
+        filter_enforcement = "ENABLED"
+      }
+    }
+
+    # Malicious-URL detection — protects against indirect injection via
+    # retrieved content that smuggles links into agent context.
+    malicious_uri_filter_settings {
+      filter_enforcement = "ENABLED"
+    }
+  }
+
+  # INSPECT_AND_BLOCK by default — framework §11.4 / F-7.
+  template_metadata {
+    enforcement_type = "INSPECT_AND_BLOCK"
+    log_template_operations = true
+    log_sanitize_operations = true
+  }
+
+  depends_on = [google_project_service.required_apis]
+}
+
+# Floor settings for Google-managed MCP servers (e.g. BigQuery MCP, used
+# by the FinOps agent). Framework §11.4 / F-7 — without floor settings,
+# the managed MCP traffic is ungoverned even when the template is set on
+# the Vertex endpoint. NOTE: the `google_model_armor_floor_setting`
+# resource is Preview at the time of writing; gate it behind a variable
+# so plan/apply doesn't fail when the resource type is not yet GA in the
+# user's provider version.
+resource "google_model_armor_floor_setting" "finops" {
+  count    = var.enable_model_armor_floor_settings ? 1 : 0
+  provider = google-beta
+
+  # Floor settings attach at organisation / folder / project scope; project
+  # scope is the safe default. Operators can raise the scope by adjusting
+  # the `name` to `organizations/<id>/locations/global/floorSetting`.
+  name = "projects/${var.project_id}/locations/global/floorSetting"
+
+  filter_config {
+    rai_settings {
+      rai_filters {
+        filter_type      = "DANGEROUS"
+        confidence_level = "HIGH"
+      }
+    }
+    pi_and_jailbreak_filter_settings {
+      filter_enforcement = "ENABLED"
+      confidence_level   = "LOW_AND_ABOVE"
+    }
+    sdp_settings {
+      basic_config {
+        filter_enforcement = "ENABLED"
+      }
+    }
+  }
+
+  enable_floor_setting_enforcement = true
+
+  depends_on = [google_project_service.required_apis]
 }
 
 # ---------- Pub/Sub Topic for Cost Alerts ----------
@@ -203,6 +345,18 @@ resource "google_project_iam_member" "finops_roles" {
 ################################################################################
 
 # ---------- Service Account for the ADK Agent Runtime ----------
+#
+# Framework §7.1 / F-2 — per-agent identity is the documented best-
+# practice shape. Vertex AI Agent Identity provides a SPIFFE-bound,
+# Google-managed Context-Aware Access principal per agent. The
+# google-beta provider exposes ``google_vertex_ai_agent_identity``
+# (Preview at the time of writing). To graduate from the shared service
+# account below, set ``enable_vertex_agent_identity = true`` and the
+# terraform module will provision the per-agent identity and bind it to
+# Cloud Run alongside the SA below.
+#
+# Until then this single SA is shared across agent invocations (L1).
+# Boundary contract: declared in CLAUDE.md / docs/governance.
 
 resource "google_service_account" "adk_agent" {
   account_id   = "${var.name_prefix}-adk-agent"

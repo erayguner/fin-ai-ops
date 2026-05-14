@@ -268,6 +268,123 @@ class AgentTrace(BaseModel):
         end = self.ended_at or datetime.now(UTC)
         return (end - self.started_at).total_seconds() * 1000.0
 
+    def to_otel_spans(self) -> list[dict[str, Any]]:
+        """Emit each :class:`AgentStep` as an OpenTelemetry-shaped span dict.
+
+        Framework §9.1 — traces must be emittable as OTel spans so they
+        integrate with any OTel-compatible APM (Datadog, Honeycomb,
+        Grafana Tempo, Cloud Trace, X-Ray). The mapping is:
+
+        * ``correlation_id`` → ``trace_id``
+        * ``step_id``        → ``span_id``
+        * ``parent_step_id`` → ``parent_span_id``
+
+        Trace + span IDs are normalised to the OTel-required lengths
+        (32 hex chars for trace_id, 16 for span_id) by SHA-256-hashing
+        the source UUIDs. Span attributes carry step-type-specific
+        details so backend queries can filter by tool name, model id,
+        verdict, etc. without parsing the rationale string.
+
+        Returns a list of plain dicts so consumers can serialise to OTLP
+        JSON without dragging in the SDK. When the ``opentelemetry`` SDK
+        is available, the caller can pass these dicts to ``trace_api``
+        manually; we don't import it here to keep this module dependency-free.
+        """
+        import hashlib
+
+        trace_seed = self.correlation_id or self.session_id
+
+        def _hex(seed: str, length: int) -> str:
+            return hashlib.sha256(seed.encode()).hexdigest()[:length] if seed else "0" * length
+
+        trace_id = _hex(trace_seed, 32)
+        spans: list[dict[str, Any]] = []
+
+        for step in self.steps:
+            span_id = _hex(step.step_id, 16)
+            parent_span_id = _hex(step.parent_step_id, 16) if step.parent_step_id else None
+            attributes: dict[str, Any] = {
+                "agent.session_id": self.session_id,
+                "agent.correlation_id": self.correlation_id,
+                "agent.name": self.agent_name,
+                "agent.provider": self.provider.value,
+                "agent.step_type": step.step_type.value,
+                "agent.rationale": step.rationale,
+                "agent.actor": step.actor,
+            }
+            # Step-specific attributes.
+            if isinstance(step, ModelInvocationStep):
+                attributes.update(
+                    {
+                        "gen_ai.system": "anthropic" if "claude" in step.model_id else "gemini",
+                        "gen_ai.request.model": step.model_id,
+                        "gen_ai.usage.input_tokens": step.input_tokens,
+                        "gen_ai.usage.output_tokens": step.output_tokens,
+                        "gen_ai.response.latency_ms": step.latency_ms,
+                    }
+                )
+            elif isinstance(step, ToolInvocationStep):
+                attributes.update(
+                    {
+                        "tool.name": step.tool_name,
+                        "tool.duration_ms": step.duration_ms,
+                        "tool.succeeded": step.succeeded,
+                    }
+                )
+                if step.error:
+                    attributes["tool.error"] = step.error
+            elif isinstance(step, GuardrailEvaluationStep):
+                attributes.update(
+                    {
+                        "guardrail.name": step.guardrail_name,
+                        "guardrail.triggered": step.triggered,
+                        "guardrail.action": step.action,
+                    }
+                )
+            elif isinstance(step, ApprovalRequestStep):
+                attributes.update(
+                    {
+                        "approval.request_id": step.request_id,
+                        "approval.approved": step.approved,
+                    }
+                )
+            elif isinstance(step, HumanOverrideStep):
+                attributes.update(
+                    {
+                        "override.type": step.override_type,
+                        "override.operator": step.operator,
+                    }
+                )
+            elif isinstance(step, FilterDecisionStep):
+                attributes.update(
+                    {
+                        "filter.name": step.filter_name,
+                        "filter.verdict": step.verdict,
+                    }
+                )
+            elif isinstance(step, FailureStep):
+                attributes.update(
+                    {
+                        "failure.error_type": step.error_type,
+                        "failure.recoverable": step.recoverable,
+                    }
+                )
+
+            spans.append(
+                {
+                    "name": f"agent.{step.step_type.value}",
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "parent_span_id": parent_span_id,
+                    "start_time_unix_nano": int(step.timestamp.timestamp() * 1e9),
+                    "end_time_unix_nano": int(step.timestamp.timestamp() * 1e9),
+                    "kind": "SPAN_KIND_INTERNAL",
+                    "attributes": attributes,
+                }
+            )
+
+        return spans
+
     def to_markdown(self) -> str:
         """Render a human-readable transcript for post-action review.
 

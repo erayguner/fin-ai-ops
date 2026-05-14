@@ -89,11 +89,16 @@ class ReconciliationAgent:
         audit_logger: AuditLogger | None = None,
         alerts: list[CostAlert] | None = None,
         stale_alert_hours: int = 168,  # 7 days
+        approval_store: Any | None = None,
     ) -> None:
         self._event_store = event_store
         self._audit = audit_logger
         self._alerts = alerts or []
         self._stale_hours = stale_alert_hours
+        # ADR-008 §4 / framework §13.3 — sweep expired approval requests
+        # as part of reconciliation. The store is optional so the agent
+        # works in deployments that haven't wired approvals yet.
+        self._approval_store = approval_store
 
     def get_unevaluated_events(self) -> list[str]:
         """Return event IDs that were stored but never evaluated.
@@ -123,6 +128,7 @@ class ReconciliationAgent:
         self._check_stale_alerts(report)
         self._check_orphaned_events(report)
         self._check_alert_consistency(report)
+        self._check_expired_approvals(report)
 
         if report.issues:
             logger.warning(
@@ -135,6 +141,42 @@ class ReconciliationAgent:
             logger.info("Reconciliation: all clean")
 
         return report
+
+    def _check_expired_approvals(self, report: ReconciliationReport) -> None:
+        """Find ApprovalRequest entries past expiry. Auto-fix sweeps them.
+
+        Framework §5.4 + §13.3 — expired approvals must be denied and
+        the queue kept honest. ``ApprovalStore.sweep_expired`` flips
+        ``PENDING`` → ``EXPIRED``; an unexpected residue is reported as
+        a degradation signal.
+        """
+        if self._approval_store is None:
+            return
+        try:
+            expired = self._approval_store.list_expired()
+        except AttributeError:
+            return
+        if not expired:
+            return
+        # Auto-fix: sweep the queue so subsequent governance calls see a
+        # clean state. The sweep is itself idempotent.
+        swept = self._approval_store.sweep_expired()
+        report.add_issue(
+            "expired_approvals",
+            f"{len(expired)} approval request(s) past expiry detected",
+            severity="warning",
+            auto_fixable=True,
+            details={
+                "expired_count": len(expired),
+                "swept_count": swept,
+                "request_ids": [r.request_id for r in expired[:10]],
+            },
+        )
+        report.add_fix(
+            "expired_approvals",
+            f"Swept {swept} expired approval request(s) to EXPIRED",
+            details={"count": swept},
+        )
 
     def _check_audit_integrity(self, report: ReconciliationReport) -> None:
         """Verify the audit chain has no tampered entries."""

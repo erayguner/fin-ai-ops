@@ -366,11 +366,12 @@ def get_bedrock_agent_config() -> dict[str, Any]:
     """
     return {
         "agent_name": "finops-cost-governance-agent",
-        # Claude Sonnet 4 is only served via cross-region inference profiles
+        # Claude Sonnet 4.5 is only served via cross-region inference profiles
         # (see docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
         # Use the regional prefix that matches your deployment region — ``eu.`` for
         # eu-* regions, ``us.`` for us-* regions, etc.
-        "foundation_model": "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+        # Keep this synchronised with providers/aws/terraform/variables.tf::bedrock_model_id.
+        "foundation_model": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "instruction": """You are an AWS FinOps governance agent. Your role is to:
 
 1. MONITOR: Analyse AWS Cost Explorer data to identify spending trends and anomalies.
