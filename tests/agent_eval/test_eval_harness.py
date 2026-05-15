@@ -36,9 +36,15 @@ def test_eval_harness_passes_all_dimensions(runner: EvalRunner) -> None:
 
 def test_runner_loads_seed_cases() -> None:
     runner = EvalRunner.from_seed_dir(CASES_DIR)
-    # 5 seeded cases — keep this assertion as a tripwire so new cases are
-    # added intentionally, not silently.
-    assert len(runner._cases) == 5
+    # 6 seeded cases — keep this assertion as a tripwire so new cases are
+    # added intentionally, not silently. The 6th is multi-turn.
+    assert len(runner._cases) == 6
+
+
+def test_multi_turn_case_present() -> None:
+    runner = EvalRunner.from_seed_dir(CASES_DIR)
+    ids = [c.id for c in runner._cases]
+    assert "06_multi_turn_remediation" in ids
 
 
 def test_offline_agent_deterministic() -> None:

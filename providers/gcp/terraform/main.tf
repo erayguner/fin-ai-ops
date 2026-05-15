@@ -116,6 +116,58 @@ resource "google_project_iam_audit_config" "modelarmor" {
   depends_on = [google_project_service.required_apis]
 }
 
+# Quality-alert policy stub (framework §17.2). Vertex AI Online Monitors
+# aren't yet GA in the Terraform provider, so we model the same coverage
+# with a Cloud Monitoring alert policy on a custom metric the workload
+# emits when it detects a Model Armor block, a halt, or an anomaly
+# observer signal. The metric itself is produced by the agent runtime
+# (see core/agent_observer.py); this resource is the page-the-on-call
+# half of the loop.
+
+resource "google_monitoring_alert_policy" "agent_quality" {
+  project      = var.project_id
+  display_name = "${var.name_prefix}-finops-agent-quality"
+  combiner     = "OR"
+  enabled      = true
+
+  documentation {
+    content   = "Custom-metric-backed alert for Model Armor block rate and AgentObserver anomaly signals. Runbook: docs/runbooks/guardrail-storm.md."
+    mime_type = "text/markdown"
+  }
+
+  conditions {
+    display_name = "model-armor-block-rate"
+    condition_threshold {
+      filter          = "metric.type = \"custom.googleapis.com/finops/agent/model_armor_blocks\" AND resource.type = \"generic_task\""
+      duration        = "300s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 10
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  conditions {
+    display_name = "agent-observer-critical"
+    condition_threshold {
+      filter          = "metric.type = \"custom.googleapis.com/finops/agent/anomaly_critical\" AND resource.type = \"generic_task\""
+      duration        = "60s"
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  # No notification channels by default — operator fills in via
+  # `google_monitoring_notification_channel` outside this module.
+  user_labels = local.common_labels
+}
+
 # ADR-008 §9 / G-G3 / F-7 — Model Armor template. Filters inspect every
 # prompt and response sent through any Vertex AI endpoint and any
 # Google-managed MCP server attached to this template. Framework §11.4

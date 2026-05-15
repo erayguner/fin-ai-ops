@@ -1076,25 +1076,83 @@ resource "aws_bedrock_guardrail_version" "finops" {
   description   = "Production-pinned guardrail version"
 }
 
-# ---------- Bedrock Agent + Action Groups + Alias ----------
+# ---------- Quality alerts / online monitor (framework §17.2) ----------
+#
+# AgentCore Evaluations / Vertex AI Online Monitors aren't yet exposed
+# in either Terraform provider, so we model the same coverage with a
+# log-metric-filter + alarm pair: every Bedrock invocation that contains
+# `"GUARDRAIL_INTERVENED"` increments a custom metric; sustained rates
+# above baseline page on-call. Pairs with the guardrail-storm runbook
+# at docs/runbooks/guardrail-storm.md.
 
-resource "aws_bedrockagent_agent" "finops" {
-  agent_name                  = "${var.name_prefix}-finops-governance"
-  agent_resource_role_arn     = aws_iam_role.bedrock_agent.arn
-  foundation_model            = var.bedrock_model_id
-  idle_session_ttl_in_seconds = 1800
-  description                 = "FinOps governance agent — cost anomalies, tagging compliance, optimisation (AgentCore-native)."
-  prepare_agent               = true
+resource "aws_cloudwatch_log_metric_filter" "guardrail_interventions" {
+  name           = "${var.name_prefix}-bedrock-guardrail-interventions"
+  log_group_name = aws_cloudwatch_log_group.bedrock_invocations.name
+  pattern        = "\"GUARDRAIL_INTERVENED\""
 
-  dynamic "guardrail_configuration" {
-    for_each = var.enable_guardrails ? [1] : []
-    content {
-      guardrail_identifier = aws_bedrock_guardrail.finops[0].guardrail_id
-      guardrail_version    = aws_bedrock_guardrail_version.finops[0].version
-    }
+  metric_transformation {
+    name          = "BedrockGuardrailInterventions"
+    namespace     = "FinOpsAgent/Quality"
+    value         = "1"
+    default_value = "0"
+    unit          = "Count"
   }
+}
 
-  instruction = <<-EOT
+resource "aws_cloudwatch_metric_alarm" "guardrail_intervention_storm" {
+  alarm_name          = "${var.name_prefix}-guardrail-storm"
+  alarm_description   = "Guardrail intervention rate exceeded baseline for >5 minutes. Runbook: docs/runbooks/guardrail-storm.md"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 5
+  datapoints_to_alarm = 5
+  threshold           = 10           # > 10 interventions in 5-min window
+  period              = 60
+  metric_name         = "BedrockGuardrailInterventions"
+  namespace           = "FinOpsAgent/Quality"
+  statistic           = "Sum"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.finops_alerts.arn]
+  ok_actions          = [aws_sns_topic.finops_alerts.arn]
+
+  tags = merge(local.common_tags, { Purpose = "agent-quality-alert" })
+}
+
+# Token-usage anomaly alarm — pairs with core/agent_observer.py budget
+# detector. Configured here so operations still get paged even when the
+# in-process observer is bypassed (e.g. direct InvokeModel calls).
+resource "aws_cloudwatch_log_metric_filter" "agent_token_usage" {
+  name           = "${var.name_prefix}-bedrock-token-usage"
+  log_group_name = aws_cloudwatch_log_group.bedrock_invocations.name
+  pattern        = "[..., total_tokens]"     # placeholder pattern; refine per log shape
+
+  metric_transformation {
+    name          = "BedrockTokensIngested"
+    namespace     = "FinOpsAgent/Quality"
+    value         = "$total_tokens"
+    default_value = "0"
+    unit          = "Count"
+  }
+}
+
+# ---------- Bedrock Prompt Management (framework §11.7, §16.1) ----------
+#
+# Versioned, drift-free agent instruction. Moves the prompt out of the
+# inline aws_bedrockagent_agent.instruction string (which is a heredoc
+# inside Terraform and therefore drifts with every refactor) into a
+# Bedrock Prompt Management resource so:
+#
+#   * Every prompt revision has a stable ARN + version.
+#   * `aws_bedrockagent_prompt_version` pins a specific text + variants.
+#   * Audit / boundary contract can cite the prompt version explicitly.
+#   * Subsequent prompt-only changes go through a 2-peer review per
+#     framework §16.2 without touching the agent resource itself.
+#
+# This requires AWS provider >= 6.5 (aws_bedrockagent_prompt landed in
+# 6.5). Older providers can keep the inline `instruction` form; the
+# variable below toggles between the two.
+
+locals {
+  finops_agent_instruction = <<-EOT
     You are an AWS FinOps governance agent (2026). Your single responsibility
     is cost and tagging governance for this AWS organisation.
 
@@ -1113,8 +1171,68 @@ resource "aws_bedrockagent_agent" "finops" {
         ownership, retrieve from the knowledge base BEFORE answering.
       - Never invent cost numbers — always call `cost_tools`.
 
+    Safety:
+      - Refuse requests for AWS access keys, secret keys, session tokens,
+        or any credential material. These are denied by guardrail.
+      - Refuse destructive IaC requests (drop tables, force-push, terminate
+        production) — these require approval via the remediation_tools RoC.
+
     All interactions are audit-logged with checksums.
   EOT
+}
+
+resource "aws_bedrockagent_prompt" "finops_instruction" {
+  count           = var.enable_prompt_management ? 1 : 0
+  name            = "${var.name_prefix}-finops-instruction"
+  description     = "FinOps governance agent instruction. Pinned by version."
+  default_variant = "v1"
+  customer_encryption_key_arn = var.kms_key_arn
+
+  variant {
+    name          = "v1"
+    model_id      = var.bedrock_model_id
+    template_type = "TEXT"
+
+    template_configuration {
+      text {
+        text = local.finops_agent_instruction
+      }
+    }
+  }
+
+  tags = merge(local.common_tags, { Purpose = "agent-instruction" })
+}
+
+resource "aws_bedrockagent_prompt_version" "finops_instruction" {
+  count       = var.enable_prompt_management ? 1 : 0
+  prompt_arn  = aws_bedrockagent_prompt.finops_instruction[0].arn
+  description = "Production-pinned instruction version (synchronised with agent prepare)."
+  tags        = local.common_tags
+}
+
+# ---------- Bedrock Agent + Action Groups + Alias ----------
+
+resource "aws_bedrockagent_agent" "finops" {
+  agent_name                  = "${var.name_prefix}-finops-governance"
+  agent_resource_role_arn     = aws_iam_role.bedrock_agent.arn
+  foundation_model            = var.bedrock_model_id
+  idle_session_ttl_in_seconds = 1800
+  description                 = "FinOps governance agent — cost anomalies, tagging compliance, optimisation (AgentCore-native)."
+  prepare_agent               = true
+
+  dynamic "guardrail_configuration" {
+    for_each = var.enable_guardrails ? [1] : []
+    content {
+      guardrail_identifier = aws_bedrock_guardrail.finops[0].guardrail_id
+      guardrail_version    = aws_bedrock_guardrail_version.finops[0].version
+    }
+  }
+
+  # Instruction source: when Prompt Management is enabled, the agent
+  # gets the canonical text from local.finops_agent_instruction (same
+  # source as the prompt resource). The prompt ARN itself is exposed
+  # in outputs.tf so consumers cite it in boundary contracts.
+  instruction = local.finops_agent_instruction
 
   tags = local.common_tags
 }

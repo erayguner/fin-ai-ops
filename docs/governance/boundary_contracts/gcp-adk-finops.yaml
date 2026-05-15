@@ -1,0 +1,104 @@
+schema_version: "1"
+agent_id: gcp-adk-finops-v1
+agent_name: gcp_finops_agent
+provider: gcp
+role: advisor
+purpose: >
+  Analyse GCP billing export, surface costly resources, audit label
+  compliance, and produce human-readable cost reports for FinOps stakeholders.
+
+foundation_model:
+  card_reference: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-2-5-flash
+  model_id: gemini-2.5-flash
+  pinned_version: "2.5-flash"            # tracked via Vertex model id
+
+in_scope_tools:
+  - analyse_billing_costs                # BigQuery billing export
+  - detect_costly_resources              # Cloud Asset Inventory
+  - check_label_compliance               # Cloud Asset Inventory
+  - get_budget_status                    # Cloud Billing Budget API
+  - recommend_cost_optimisations         # Recommender API
+  - bigquery_mcp                         # Google-managed MCP server (read)
+
+out_of_scope_systems:
+  - Cloud Resource Manager mutations (projects, folders)
+  - IAM role / policy mutations
+  - KMS key creation / deletion
+  - all `Delete*` / `Update*` mutations on production resources
+  - any project outside the configured FINOPS_GCP_PROJECTS list
+
+delegatable_downstream_agents: []      # no A2A delegation today
+
+data_classes_handled:
+  - internal           # billing numbers, resource IDs, label values
+  - confidential       # project-level cost breakdowns; cross-tenant aggregates
+
+approval_class: none                   # advisor — read-only, no actions
+approver_pool: []
+
+owner: platform-finops@example.com
+on_call_rotation: https://oncall.example.com/finops
+
+maturity_level: L1                     # framework §18.1
+graduation_notes: |
+  L2 requires Vertex Agent Identity (SPIFFE per-agent) and the managed
+  Agent Engine Runtime. Currently runs on Cloud Run v2 with WIF. To
+  graduate: set `enable_vertex_agent_identity = true` in
+  providers/gcp/terraform/ and migrate the runtime to Agent Engine.
+
+prompt_pin:
+  source: providers/gcp/agents/finops_agent.py::create_gcp_finops_agent
+  version: git-sha
+  fallback_inline: true
+
+data_lineage:
+  retrieval_sources:
+    - name: bigquery-billing-export
+      version: gcp_billing_export_v1_<billing-account>
+      provenance: GCP-managed export (read-only)
+    - name: cloud-asset-inventory
+      version: live
+    - name: vertex-vector-search
+      version: aws_vector_search_index.finops_runbooks.id  # if enabled
+      provenance: docs uploaded by platform-finops
+
+guardrails:
+  model_armor:
+    template: finops-finops-model-armor
+    mode: INSPECT_AND_BLOCK
+    families:
+      rai_filters: [HATE_SPEECH, HARASSMENT, SEXUALLY_EXPLICIT, DANGEROUS]
+      pi_and_jailbreak: ENABLED (LOW_AND_ABOVE)
+      sdp_settings: ENABLED
+      malicious_uri: ENABLED
+    floor_settings: flag-gated (Preview)
+  gemini_safety_settings:
+    HARM_CATEGORY_HATE_SPEECH: BLOCK_LOW_AND_ABOVE
+    HARM_CATEGORY_HARASSMENT: BLOCK_LOW_AND_ABOVE
+    HARM_CATEGORY_SEXUALLY_EXPLICIT: BLOCK_LOW_AND_ABOVE
+    HARM_CATEGORY_DANGEROUS_CONTENT: BLOCK_LOW_AND_ABOVE
+  platform_filters:
+    - core.filters.PIIRedactor
+    - core.filters.PromptInjectionHeuristic
+    - core.filters.SecretScanner
+
+observability:
+  trace_destination: Cloud Logging + Cloud Trace (Vertex Data-Access audit logs enabled)
+  metrics: Cloud Monitoring
+  audit_destination: core/audit.py chained-checksum trail
+  otel_emission: AgentTrace.to_otel_spans() — no exporter wired in this deployment
+
+boundary_review:
+  last_renewed: 2026-05-14
+  next_due: 2026-08-14
+  review_required_change_types:
+    - tool added to allow-list
+    - role promotion (advisor → operator requires per-call approval gate)
+    - safety_settings threshold change
+    - model pin upgrade
+
+notes: |
+  This agent is advisor-class: it generates reports and recommendations
+  but does not invoke any mutation APIs. To promote to operator, add
+  an ApprovalGateway and wire destructive tools through
+  finops_pending_approvals / finops_respond_approval.

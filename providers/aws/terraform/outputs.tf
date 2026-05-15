@@ -68,6 +68,21 @@ output "opensearch_collection_endpoint" {
   value       = var.enable_knowledge_base ? aws_opensearchserverless_collection.kb[0].collection_endpoint : null
 }
 
+output "prompt_arn" {
+  description = "Bedrock Prompt Management ARN for the agent instruction (null if disabled). Cite in boundary contracts."
+  value       = var.enable_prompt_management ? aws_bedrockagent_prompt.finops_instruction[0].arn : null
+}
+
+output "prompt_version" {
+  description = "Pinned Bedrock prompt version (framework §16.1)."
+  value       = var.enable_prompt_management ? aws_bedrockagent_prompt_version.finops_instruction[0].version : null
+}
+
+output "bedrock_invocation_log_group" {
+  description = "CloudWatch Log Group capturing every Bedrock model invocation."
+  value       = aws_cloudwatch_log_group.bedrock_invocations.name
+}
+
 output "guardrail_id" {
   description = "Bedrock Guardrail ID (null if disabled)."
   value       = var.enable_guardrails ? aws_bedrock_guardrail.finops[0].guardrail_id : null

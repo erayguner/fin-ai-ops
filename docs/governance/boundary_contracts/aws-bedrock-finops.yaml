@@ -1,0 +1,108 @@
+schema_version: "1"
+agent_id: aws-bedrock-finops-v1
+agent_name: finops-cost-governance-agent
+provider: aws
+role: operator
+purpose: >
+  Surface cost anomalies, enforce tagging compliance, and propose / execute
+  remediations (under approval) for the AWS organisation.
+
+foundation_model:
+  card_reference: https://docs.anthropic.com/en/docs/about-claude/models/all-models
+  model_id: eu.anthropic.claude-sonnet-4-5-20250929-v1:0
+  pinned_version: "20250929-v1:0"
+  inference_profile: cross-region (eu)
+
+in_scope_tools:
+  # action group: cost_tools (read-only)
+  - cost_tools.getCosts
+  - cost_tools.getAnomalies
+  - cost_tools.getRightsizing
+  # action group: tagging_tools (read-only)
+  - tagging_tools.getTagCompliance
+  - tagging_tools.getUnattributedSpend
+  # action group: remediation_tools (destructive — RETURN_CONTROL approval gate)
+  - remediation_tools.apply_required_tags
+  - remediation_tools.stop_idle_instance
+  - remediation_tools.downsize_instance
+  # knowledge base
+  - knowledge_base:finops-runbooks
+
+out_of_scope_systems:
+  - production DNS (Route 53 hosted zones)
+  - IAM identity providers / role trust policies
+  - KMS key creation / deletion
+  - any cross-account assume-role outside the FinOps reader role
+  - all `Delete*` API calls except those listed in remediation_tools
+
+delegatable_downstream_agents: []      # no A2A delegation today
+
+data_classes_handled:
+  - internal           # cost numbers, resource IDs, tag values
+  - confidential       # account-level cost breakdowns
+
+approval_class: per_call               # framework §5.1
+approver_pool:
+  - finops-approvers@example.com
+  - security-oncall@example.com
+
+owner: platform-finops@example.com
+on_call_rotation: https://oncall.example.com/finops
+
+maturity_level: L1                     # framework §18.1
+graduation_notes: |
+  L2 requires AgentCore Identity (per-agent SPIFFE) and managed Agent
+  Runtime. Currently scaffolded with notes — see
+  providers/aws/terraform/main.tf and docs/runbooks/supply-chain.md.
+
+prompt_pin:
+  source: bedrock-prompt-management
+  resource: aws_bedrockagent_prompt.finops_instruction
+  version: tracked via output `prompt_version`
+  fallback_inline: true                # local.finops_agent_instruction
+                                        # mirrors the same text
+
+data_lineage:
+  retrieval_sources:
+    - name: bedrock-kb:finops-runbooks
+      version: track via aws_bedrockagent_knowledge_base.finops.id
+      provenance: docs uploaded by platform-finops; commit-hashed in S3
+                  bucket aws_s3_bucket.kb_corpus
+
+guardrails:
+  bedrock_guardrail:
+    name: finops-finops-guardrail
+    families:
+      content_filters: [SEXUAL, VIOLENCE, HATE, INSULTS, MISCONDUCT, PROMPT_ATTACK]
+      pii_filters: [AWS_ACCESS_KEY, AWS_SECRET_KEY, CREDIT_DEBIT_CARD_NUMBER, EMAIL, PHONE, US_SOCIAL_SECURITY_NUMBER, IP_ADDRESS, URL, USERNAME, PASSWORD]
+      denied_topics: [credential-exfiltration, destructive-iac, cost-bomb, audit-tampering]
+      word_filters: [DROP TABLE, "rm -rf /", terraform destroy, force-push, --no-verify]
+      contextual_grounding:
+        threshold: 0.75
+      automated_reasoning: not_yet_wired   # provider Preview
+  platform_filters:
+    - core.filters.PIIRedactor
+    - core.filters.PromptInjectionHeuristic
+    - core.filters.SecretScanner
+
+observability:
+  trace_destination: CloudWatch Logs (/finops/finops/bedrock-invocations) + S3 (bedrock-invocations bucket)
+  metrics: CloudWatch / X-Ray
+  audit_destination: core/audit.py chained-checksum trail; ed25519 manifests when FINOPS_AUDIT_SIGNING_KEY is set
+  otel_emission: AgentTrace.to_otel_spans() — no exporter wired in this deployment
+
+boundary_review:
+  last_renewed: 2026-05-14
+  next_due: 2026-08-14                  # framework §17.2 quarterly
+  review_required_change_types:
+    - tool added to allow-list
+    - approver pool member added or removed
+    - role promotion
+    - model pin upgrade
+    - foundation model card change
+
+notes: |
+  This agent is operator-class: it can prepare destructive actions but
+  cannot execute them without out-of-band approval (RETURN_CONTROL
+  on the remediation_tools action group). The kill-switch
+  (finops_halt_session MCP tool) overrides every in-flight call.

@@ -20,7 +20,7 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,11 @@ from core.audit import AuditLogger
 from core.config import HubConfig
 from core.event_store import BaseEventStore, InMemoryEventStore, SQLiteEventStore
 from core.filters import redact_arguments as _filters_redact_arguments
+from core.memory_audit import (
+    InMemoryMemoryBackend,
+    MemoryAdapter,
+    MemoryInjectionError,
+)
 from core.models import (
     ActionStatus,
     CloudProvider,
@@ -201,6 +206,14 @@ supervisor: AgentSupervisor = global_supervisor()
 observer: AgentObserver = global_observer()
 # Reconciliation now consults the approval store for the §13.3 fourth check.
 reconciliation_agent._approval_store = approval_store
+
+# Memory adapter: in-memory backend by default. Production deployments
+# swap the backend for Vertex Memory Bank or Bedrock AgentCore Memory
+# via the same MemoryAdapter front-end (framework §11.6).
+memory_adapter = MemoryAdapter(
+    backend=InMemoryMemoryBackend(),
+    audit_logger=audit_logger,
+)
 
 _approval_gateway_kind = hub_config.get_str("hub.approvals.gateway", "local").lower()
 approval_gateway: ApprovalGateway
@@ -999,6 +1012,88 @@ def finops_replay_session(session_id: str, fmt: str = "markdown") -> dict[str, A
     }
 
 
+# ===== Memory Governance Tools (framework §11.6) =====
+
+
+def finops_memory_write(
+    user_id: str,
+    content: str,
+    session_id: str = "",
+    provenance: str = "agent",
+    tags: list[str] | None = None,
+    ttl_seconds: int = 0,
+) -> dict[str, Any]:
+    """Write an audited memory record for a specific user.
+
+    Content is passed through the secret / PII / injection filter stack
+    before being persisted. Secret hits and injection patterns are
+    refused. PII is redacted in place. Every write emits a
+    :class:`MemoryOperationStep` into the audit chain.
+
+    ``ttl_seconds = 0`` disables expiry on this record. Use a positive
+    value for short-lived session memory.
+    """
+    user_id = sanitise_string(user_id, "user_id", max_length=256)
+    content = sanitise_string(content, "content", max_length=8192)
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    provenance = sanitise_string(provenance, "provenance", max_length=64)
+    tags = [sanitise_string(t, "tag", max_length=128) for t in (tags or [])[:50]]
+    ttl = timedelta(seconds=int(ttl_seconds)) if ttl_seconds > 0 else None
+    try:
+        record = memory_adapter.write(
+            user_id=user_id,
+            content=content,
+            session_id=session_id,
+            provenance=provenance,
+            tags=tags,
+            ttl=ttl,
+        )
+    except ValueError as exc:
+        return {"status": "blocked", "message": str(exc)}
+    return {"status": "stored", "memory_id": record.memory_id}
+
+
+def finops_memory_read(
+    user_id: str,
+    tag: str | None = None,
+    limit: int = 50,
+    session_id: str = "",
+) -> dict[str, Any]:
+    """Read audited memory records for a specific user.
+
+    Retrieved content is re-scanned for injection patterns (framework
+    §11.6 memory-injection threat model). Poisoned records are
+    quarantined and the call raises an error so the caller does not
+    leak the payload back into a session.
+    """
+    user_id = sanitise_string(user_id, "user_id", max_length=256)
+    if tag:
+        tag = sanitise_string(tag, "tag", max_length=128)
+    session_id = sanitise_string(session_id, "session_id", max_length=256)
+    limit = validate_query_limit(limit)
+    try:
+        records = memory_adapter.read(user_id=user_id, tag=tag, limit=limit, session_id=session_id)
+    except MemoryInjectionError as exc:
+        return {"status": "quarantined", "message": str(exc), "records": []}
+    return {
+        "status": "ok",
+        "count": len(records),
+        "records": [r.model_dump(mode="json") for r in records],
+    }
+
+
+def finops_memory_forget_user(user_id: str, actor: str = "system") -> dict[str, Any]:
+    """Right-to-be-forgotten — delete every memory record for ``user_id``.
+
+    The deletion is audited as a single step with the count of records
+    purged. Framework §11.6 #2 mandates a tested procedure; this is it.
+    """
+    user_id = sanitise_string(user_id, "user_id", max_length=256)
+    actor = sanitise_string(actor, "actor", max_length=256)
+    count = memory_adapter.delete_for_user(user_id=user_id, actor=actor)
+    return {"status": "completed", "user_id": user_id, "records_deleted": count}
+
+
 # ---------------------------------------------------------------------------
 # MCP Server tool registry -- maps tool names to callables
 # ---------------------------------------------------------------------------
@@ -1107,6 +1202,18 @@ MCP_TOOLS: dict[str, dict[str, Any]] = {
     "finops_replay_session": {
         "function": finops_replay_session,
         "description": finops_replay_session.__doc__,
+    },
+    "finops_memory_write": {
+        "function": finops_memory_write,
+        "description": finops_memory_write.__doc__,
+    },
+    "finops_memory_read": {
+        "function": finops_memory_read,
+        "description": finops_memory_read.__doc__,
+    },
+    "finops_memory_forget_user": {
+        "function": finops_memory_forget_user,
+        "description": finops_memory_forget_user.__doc__,
     },
 }
 

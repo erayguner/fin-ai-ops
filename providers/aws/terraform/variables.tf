@@ -65,6 +65,17 @@ variable "enable_guardrails" {
   default     = true
 }
 
+variable "enable_prompt_management" {
+  description = <<-EOT
+    Provision the agent instruction via aws_bedrockagent_prompt +
+    aws_bedrockagent_prompt_version (framework §11.7 + §16.1). Requires
+    AWS provider >= 6.5. The agent's inline `instruction` attribute is
+    kept in sync with the prompt source so the agent works either way.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "anomaly_threshold_usd" {
   description = "Minimum anomaly impact (USD) to trigger alerts"
   type        = number

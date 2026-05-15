@@ -18,6 +18,7 @@ regardless of the incident class.
 | [cross-tenant-memory.md](cross-tenant-memory.md) | Cross-session / cross-tenant memory retrieval detected. | Critical |
 | [agent-threat-detection.md](agent-threat-detection.md) | SCC Agent Engine Threat Detection / GuardDuty finding. | High |
 | [memory-injection.md](memory-injection.md) | Indirect-injection payload detected in a session store. | High |
+| [memory-deletion.md](memory-deletion.md) | Right-to-be-forgotten / GDPR Art. 17 request. | Critical |
 
 ## On-call expectations
 

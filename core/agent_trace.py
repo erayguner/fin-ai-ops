@@ -45,6 +45,7 @@ __all__ = [
     "FilterDecisionStep",
     "GuardrailEvaluationStep",
     "HumanOverrideStep",
+    "MemoryOperationStep",
     "ModelInvocationStep",
     "ToolInvocationStep",
 ]
@@ -62,6 +63,7 @@ class AgentStepType(StrEnum):
     APPROVAL_REQUEST = "approval_request"
     HUMAN_OVERRIDE = "human_override"
     FILTER_DECISION = "filter_decision"
+    MEMORY_OPERATION = "memory_operation"
     FAILURE = "failure"
 
 
@@ -178,6 +180,43 @@ class FilterDecisionStep(_StepBase):
     matched_categories: list[str] = Field(default_factory=list)
 
 
+class MemoryOperationStep(_StepBase):
+    """Managed-memory write / read / delete event — framework §11.6.
+
+    Both providers ship first-class managed memory now (Vertex AI
+    **Memory Bank**; **Bedrock AgentCore Memory**). This step records
+    every operation so that retention sweeps, right-to-be-forgotten
+    requests, and memory-injection investigations are reconstructable
+    from the audit trail without joining a separate store.
+    """
+
+    step_type: Literal[AgentStepType.MEMORY_OPERATION] = AgentStepType.MEMORY_OPERATION
+    operation: Literal["write", "read", "delete", "expire"] = "read"
+    user_id: str = Field(
+        default="",
+        description="Owning principal — drives cross-tenant isolation and the "
+        "right-to-be-forgotten flow.",
+    )
+    memory_key: str = Field(
+        default="",
+        description="Backend-specific stable identifier (e.g. Memory Bank "
+        "memory_id, AgentCore Memory record_id). Empty on bulk operations.",
+    )
+    backend: str = Field(
+        default="",
+        description="Name of the underlying store: 'memory_bank', "
+        "'agentcore_memory', 'in_memory', etc.",
+    )
+    content_preview: str = Field(
+        default="",
+        description="Truncated content (512 chars). Full payload stays in "
+        "the backend; this captures enough for forensic review.",
+    )
+    filter_verdict: Literal["allow", "redact", "block"] = "allow"
+    succeeded: bool = True
+    error: str = ""
+
+
 class FailureStep(_StepBase):
     step_type: Literal[AgentStepType.FAILURE] = AgentStepType.FAILURE
     error_type: str = ""
@@ -192,6 +231,7 @@ AgentStep = Annotated[
     | ApprovalRequestStep
     | HumanOverrideStep
     | FilterDecisionStep
+    | MemoryOperationStep
     | FailureStep,
     Field(discriminator="step_type"),
 ]
@@ -362,6 +402,17 @@ class AgentTrace(BaseModel):
                         "filter.verdict": step.verdict,
                     }
                 )
+            elif isinstance(step, MemoryOperationStep):
+                attributes.update(
+                    {
+                        "memory.operation": step.operation,
+                        "memory.backend": step.backend,
+                        "memory.user_id": step.user_id,
+                        "memory.key": step.memory_key,
+                        "memory.filter_verdict": step.filter_verdict,
+                        "memory.succeeded": step.succeeded,
+                    }
+                )
             elif isinstance(step, FailureStep):
                 attributes.update(
                     {
@@ -433,6 +484,12 @@ def _step_oneliner(step: _StepBase) -> str:
     if isinstance(step, FilterDecisionStep):
         cats = ",".join(step.matched_categories) or "-"
         return f"filter={step.filter_name} verdict={step.verdict} cats={cats}"
+    if isinstance(step, MemoryOperationStep):
+        status = "ok" if step.succeeded else f"err:{step.error[:60]}"
+        return (
+            f"memory={step.operation} backend={step.backend} "
+            f"user={step.user_id or '-'} key={step.memory_key or '-'} ({status})"
+        )
     if isinstance(step, FailureStep):
         return f"{step.error_type}: {step.error_message[:80]}"
     return "(unknown step)"
