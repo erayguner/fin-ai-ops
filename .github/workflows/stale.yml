@@ -1,0 +1,73 @@
+name: Stale issues & PRs
+
+# opensource.guide recommends pruning dormant threads so the queue
+# reflects real work. We're conservative: 60 days inactive → mark
+# stale, 14 more days → close. `needs-info` issues close faster
+# because they're already blocked on the reporter.
+
+on:
+  schedule:
+    - cron: '30 5 * * *'   # daily, 05:30 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: stale-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    name: Mark dormant issues
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Apply stale policy
+        uses: actions/stale@b5d41d4e1d5dceea10e7104786b73624c18a190f # v10.2.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          days-before-issue-stale: 60
+          days-before-issue-close: 14
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
+
+          stale-issue-message: |
+            This issue has had no activity for 60 days, so we're
+            marking it stale. If it's still relevant, drop a comment
+            with the latest context (or a reproducer) and we'll
+            re-open it.
+
+          stale-pr-message: |
+            This pull request has had no activity for 30 days.
+            Push a new commit or comment to keep it open. We'll
+            close it in 14 days otherwise.
+
+          close-issue-message: |
+            Closing this as dormant. We're happy to re-open with
+            fresh context — just comment here.
+
+          close-pr-message: |
+            Closing this PR as dormant. Open a fresh PR when you're
+            ready to continue, and reference this one.
+
+          stale-issue-label: 'stale'
+          stale-pr-label: 'stale'
+
+          # Don't touch these — they're already excluded from the queue
+          # for unrelated reasons.
+          exempt-issue-labels: 'security,governance,help wanted,good first issue,pinned,roadmap'
+          exempt-pr-labels: 'security,governance,pinned,roadmap'
+          exempt-draft-pr: true
+
+          # `needs-info` waits on the reporter; close that loop faster.
+          any-of-labels: ''
+          remove-stale-when-updated: true
+          operations-per-run: 100

@@ -1,0 +1,41 @@
+name: Documentation
+description: Flag a docs problem (missing, wrong, confusing, out of date)
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation issues are real bugs. Thanks for filing.
+        For tiny typo fixes you may prefer to open a PR directly.
+  - type: input
+    id: location
+    attributes:
+      label: Where is the problem?
+      description: File path, URL, anchor, or screenshot.
+      placeholder: docs/runbooks/kill-switch-used.md
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What is wrong?
+      description: What does the doc say, what does the truth say, and how did you discover the mismatch?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix (optional)
+      description: A draft sentence or PR you'd be happy to write.
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Blocks me from using the project
+        - Could mislead a new contributor
+        - Cosmetic / typo
+    validations:
+      required: true

@@ -2,10 +2,49 @@
 
 [![CI](https://github.com/erayguner/fin-ai-ops/actions/workflows/ci.yml/badge.svg)](https://github.com/erayguner/fin-ai-ops/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/erayguner/fin-ai-ops/actions/workflows/codeql.yml/badge.svg)](https://github.com/erayguner/fin-ai-ops/actions/workflows/codeql.yml)
+[![OSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/erayguner/fin-ai-ops/badge)](https://securityscorecards.dev/viewer/?uri=github.com/erayguner/fin-ai-ops)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-Autonomous cost governance for AWS and GCP using **provider-native agent frameworks** and **native MCP servers**. No API keys — all authentication is via IAM roles (AWS) and Workload Identity Federation (GCP).
+> Autonomous cost governance for AWS and GCP using **provider-native agent
+> frameworks** and **native MCP servers**. No API keys — all authentication
+> is via IAM roles (AWS) and Workload Identity Federation (GCP).
+
+## Status
+
+`v0.3.0` — **production-ready core, public-template-ready.** The
+agent-governance plane (ADR-008) and the 2026 platform-alignment work
+(PLATFORM_GAP_ANALYSIS.md) are landed. New providers, managed-runtime
+graduation, and per-agent identity migration are tracked in
+[CHANGELOG.md](./CHANGELOG.md) under `[Unreleased]`.
+
+## Table of contents
+
+- [Why](#why) — what problem this solves
+- [Architecture](#architecture) — the 2026 native-agent stack
+- [Quick start](#quick-start) — `git clone` to first audit
+- [Quality gates](#quality-gates) — what runs in CI
+- [Documentation](#documentation) — index of docs, ADRs, runbooks
+- [Community](#community) — how to get help, contribute, raise concerns
+- [Roadmap](#roadmap) — what's next
+- [Security](#security) — vulnerability reporting
+- [License](#license)
+
+## Why
+
+Cloud spend is governed by humans who sit between budget owners, the
+teams that provision resources, and the security reviewers who care
+about credential abuse. That role doesn't scale. An agent can if and
+only if its reasoning, tool calls, and side-effects are *traceable*,
+*reviewable*, and *overridable* — none of which is true of bare LLM
+agents. This project is the smallest viable governance plane that
+makes a FinOps agent safe to operate on production cloud spend.
+
+Aligned with the
+[Agent Governance Framework](./docs/governance/AGENT_GOVERNANCE_FRAMEWORK.md)
+and external standards: Google SAIF, NIST AI RMF 1.0, EU AI Act
+high-risk obligations, ISO/IEC 42001, SOC 2 CC-series, UK NCSC.
 
 ## Architecture
 
@@ -312,11 +351,103 @@ The `TaggingHealthAgent` (`agents/tagging_health_agent.py`) runs weekly complian
 - **`BudgetTracker`** — total-call / per-tool / runtime / parallelism caps plus optional connection↔execution separation.
 - **Structured artifacts** — `policy_decision`, `tool_call_log`, `approval_request`, `approval_log`, `budget_stats`, `result_summary`; rendered by `AuditReportGenerator` into a machine-readable report with denial breakdowns and recommendations.
 
-The MCP server wires every `handle_tool_call()` through `governed_call()`. Disabled by default (`default_allow=True`); enable with `hub.governor.enabled=true` to fail-closed.
+The MCP server wires every `handle_tool_call()` through `governed_call()`. **Fail-closed by default** as of ADR-008 (`hub.governor.enabled=true` is the default). The kill-switch (`AgentSupervisor`), out-of-band approval gateway (`ApprovalStore`), behavioural anomaly detection (`AgentObserver`), and audited memory adapter (`MemoryAdapter`) all hang off this enforcement point.
+
+## Quick start
+
+```bash
+# Prerequisites: Python 3.12+, Terraform 1.14+ (only if deploying infra)
+git clone https://github.com/erayguner/fin-ai-ops.git
+cd fin-ai-ops
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pre-commit install
+
+# Quick smoke test — pure-Python, no cloud creds.
+pytest -q
+python scripts/governor_dry_run.py
+python scripts/ci/validate_boundary_contracts.py
+```
+
+The MCP server starts locally with:
+
+```bash
+python -m mcp_server.server  # speaks JSON-RPC on stdio
+```
+
+For cloud deployment, see [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+
+## Quality gates
+
+CI runs the following on every PR; reproduce locally with the same
+commands:
+
+- `ruff check . && ruff format --check .` — lint + format.
+- `mypy core providers agents mcp_server` — type check.
+- `pytest -q` — 660+ tests.
+- `python scripts/governor_dry_run.py` — governor invariants.
+- `python scripts/ci/validate_boundary_contracts.py` — agent boundary contracts.
+- `python scripts/validate_policies.py --strict` — JSON cost policies.
+- `python scripts/drift_check.py` — Terraform / policy alignment.
+- `pytest tests/agent_eval -q` — six-dimension regression eval (`tool_trajectory`, `response_match`, `response_quality`, `tool_use_quality`, `hallucinations`, `safety`).
+- OSSF Scorecard, gitleaks, CycloneDX/SPDX SBOM, zizmor (workflow lint).
+
+All GitHub Actions are pinned by commit SHA, not floating tags.
 
 ## Documentation
 
-- **[Getting Started](docs/GETTING_STARTED.md)** — Zero-to-full deployment guide
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** — Common issues and solutions
-- **[Security Policy](SECURITY.md)** — Security model and vulnerability reporting
-- **[Contributing](CONTRIBUTING.md)** — Development setup and PR guidelines
+| Where | What |
+|---|---|
+| [docs/GETTING_STARTED.md](./docs/GETTING_STARTED.md) | Zero-to-full deployment walkthrough. |
+| [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) | Common issues and resolutions. |
+| [docs/adr/](./docs/adr/) | Architecture decision records (8 ADRs). |
+| [docs/governance/AGENT_GOVERNANCE_FRAMEWORK.md](./docs/governance/AGENT_GOVERNANCE_FRAMEWORK.md) | The canonical governance framework these agents follow. |
+| [docs/governance/PLATFORM_GAP_ANALYSIS.md](./docs/governance/PLATFORM_GAP_ANALYSIS.md) | 2026 Gemini Enterprise + Bedrock AgentCore vs this project. |
+| [docs/governance/boundary_contracts/](./docs/governance/boundary_contracts/) | Per-agent boundary contracts (in-scope tools, out-of-scope systems, foundation-model card, approver pool, maturity level). |
+| [docs/runbooks/](./docs/runbooks/) | Incident-class runbooks (kill-switch, audit chain break, guardrail storm, RtbF memory deletion, …). |
+
+## Community
+
+| | |
+|---|---|
+| Code of Conduct | [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Contributor Covenant 2.1 |
+| How to contribute | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+| Governance & decision-making | [GOVERNANCE.md](./GOVERNANCE.md) |
+| Maintainer roster | [MAINTAINERS.md](./MAINTAINERS.md) |
+| Getting help | [SUPPORT.md](./SUPPORT.md) |
+| Release notes | [CHANGELOG.md](./CHANGELOG.md) |
+| Sponsorship | [.github/FUNDING.yml](./.github/FUNDING.yml) |
+
+**Where to ask:**
+
+- Bug or unexpected behaviour → [open an issue](https://github.com/erayguner/fin-ai-ops/issues/new?template=bug_report.yml).
+- Feature request → [open a feature issue](https://github.com/erayguner/fin-ai-ops/issues/new?template=feature_request.yml).
+- Documentation problem → [open a docs issue](https://github.com/erayguner/fin-ai-ops/issues/new?template=documentation.yml).
+- Question / discussion → [GitHub Discussions](https://github.com/erayguner/fin-ai-ops/discussions) (enable in repo settings).
+- Security vulnerability → [Private Security Advisory](https://github.com/erayguner/fin-ai-ops/security/advisories/new). **Never as a public issue.**
+
+We aim for **48-hour first response** on security reports and best-
+effort triage within a week for everything else. opensource.guide is
+the reference for how the project tries to operate.
+
+## Roadmap
+
+Live status in [CHANGELOG.md](./CHANGELOG.md) `[Unreleased]`. Major
+deferred items, tracked in [docs/governance/PLATFORM_GAP_ANALYSIS.md](./docs/governance/PLATFORM_GAP_ANALYSIS.md):
+
+- L2 graduation to **Bedrock AgentCore Runtime** + **Vertex AI Agent Engine Runtime** when provider Terraform exposes the resources.
+- Per-agent identity (Vertex Agent Identity / Bedrock AgentCore Identity) once GA in the Terraform AWS provider.
+- Automated Reasoning Policy attachment when the AWS provider exposes the resource type.
+- A2A protocol exposure when a second agent enters scope.
+
+## Security
+
+See [SECURITY.md](./SECURITY.md) for the full security model, supported
+versions, and the vulnerability-disclosure process. Reports go through
+[GitHub Security Advisories](https://github.com/erayguner/fin-ai-ops/security/advisories/new) — please don't file vulnerabilities as
+public issues.
+
+## License
+
+[MIT](./LICENSE). By contributing you agree your contributions are
+licensed under the same terms — see [CONTRIBUTING.md](./CONTRIBUTING.md).

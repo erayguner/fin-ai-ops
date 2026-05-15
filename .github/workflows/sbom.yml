@@ -1,0 +1,61 @@
+name: SBOM
+
+# Generate a CycloneDX / SPDX Software Bill of Materials on every push
+# to main, attach it to the workflow run, and publish to the GitHub
+# dependency graph. SBOMs are an OSSF Scorecard signal and a typical
+# requirement for downstream consumers in regulated environments.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pyproject.toml'
+      - 'providers/*/terraform/.terraform.lock.hcl'
+      - '.github/workflows/sbom.yml'
+
+permissions: {}
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Anchore SBOM action (Syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          # Don't upload to GitHub release on PR runs; only on main push.
+          upload-release-assets: false
+          upload-artifact: true
+          upload-artifact-retention: 30
+
+      - name: Attach SPDX variant for downstream consumers
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: true
+          upload-release-assets: false
+          upload-artifact-retention: 30

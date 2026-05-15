@@ -1,5 +1,14 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Security vulnerability
+  - name: 🛡️ Security vulnerability
     url: https://github.com/erayguner/fin-ai-ops/security/advisories/new
-    about: Report security vulnerabilities privately via GitHub Security Advisories.
+    about: Report security vulnerabilities privately via GitHub Security Advisories — never as a public issue.
+  - name: ❓ Question or discussion
+    url: https://github.com/erayguner/fin-ai-ops/discussions
+    about: For how-do-I questions and project discussions. Enable GitHub Discussions if you don't see this link.
+  - name: 📖 Documentation index
+    url: https://github.com/erayguner/fin-ai-ops#documentation
+    about: README index of governance docs, runbooks, and ADRs.
+  - name: 🤝 Code of Conduct concern
+    url: https://github.com/erayguner/fin-ai-ops/security/advisories/new
+    about: Code of Conduct reports are handled through the same private channel as security reports.

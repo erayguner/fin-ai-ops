@@ -1,1 +1,50 @@
-* @erayguner
+# CODEOWNERS — automatic reviewer assignment.
+#
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customizations/customizing-your-repository/about-code-owners
+# Reviewer / maintainer roster is in /MAINTAINERS.md.
+#
+# Ordering matters: the LAST matching pattern wins. Keep the catch-all
+# at the top so more-specific rules below override it.
+
+# Catch-all — every change has at least one reviewer.
+*                                  @erayguner
+
+# Governance & security artefacts.
+/CODE_OF_CONDUCT.md                @erayguner
+/GOVERNANCE.md                     @erayguner
+/SECURITY.md                       @erayguner
+/MAINTAINERS.md                    @erayguner
+/CHANGELOG.md                      @erayguner
+/SUPPORT.md                        @erayguner
+
+# Architecture decision records — touch only via ADR PR.
+/docs/adr/                         @erayguner
+
+# Agent governance — broadest blast radius.
+/docs/governance/                  @erayguner
+/docs/governance/boundary_contracts/  @erayguner
+
+# Runbooks — operational impact.
+/docs/runbooks/                    @erayguner
+
+# Core engine — domain models, governors, audit, filters.
+/core/                             @erayguner
+
+# Cloud-provider integrations.
+/providers/                        @erayguner
+/providers/aws/terraform/          @erayguner
+/providers/gcp/terraform/          @erayguner
+
+# MCP server — public API surface.
+/mcp_server/                       @erayguner
+
+# Policies and tagging — cost-impacting.
+/policies/                         @erayguner
+
+# CI / GitHub workflows — supply-chain hygiene.
+/.github/                          @erayguner
+/.github/workflows/                @erayguner
+
+# Tests — the merge gate.
+/tests/                            @erayguner
+/tests/agent_eval/                 @erayguner

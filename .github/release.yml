@@ -1,0 +1,46 @@
+# Automatic release-notes generation.
+#
+# When the maintainer drafts a release on GitHub, the "Generate
+# release notes" button uses this config to bucket merged PRs into
+# sections that mirror Keep a Changelog.
+#
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - dependencies/auto
+    authors:
+      - dependabot[bot]
+  categories:
+    - title: 🚨 Security
+      labels:
+        - security
+    - title: 💥 Breaking changes
+      labels:
+        - breaking-change
+    - title: ✨ Added
+      labels:
+        - enhancement
+        - feature
+    - title: 🐛 Fixed
+      labels:
+        - bug
+    - title: ⚡ Performance
+      labels:
+        - performance
+    - title: 📚 Documentation
+      labels:
+        - documentation
+    - title: 🔧 Infrastructure / CI
+      labels:
+        - github-actions
+        - ci
+        - terraform
+    - title: 🧹 Dependencies
+      labels:
+        - dependencies
+    - title: Other Changes
+      labels:
+        - "*"

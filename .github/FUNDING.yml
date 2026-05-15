@@ -1,0 +1,18 @@
+# Sponsorship surfaces.
+#
+# opensource.guide notes that sustainability often requires explicit
+# funding channels. Keep this file even when no sponsorship is active —
+# its absence makes the project look unfunded; its presence with empty
+# values is a deliberate "no sponsorship at this time" signal.
+
+github: [erayguner]
+# patreon:          # uncomment when configured
+# open_collective:
+# ko_fi:
+# tidelift:         # tidelift platform name/package-name
+# community_bridge:
+# liberapay:
+# issuehunt:
+# polar:
+# buy_me_a_coffee:
+# custom:
